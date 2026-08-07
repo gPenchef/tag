@@ -54,7 +54,6 @@ function closeExitMenu() {
   render();
 }
 $('#leave').onclick = leaveLobby;
-$('#leave-game').onclick = openExitMenu;
 
 socket.on('connect', () => { myId = socket.id; });
 socket.on('lobby:error', (message) => { $('#lobby-error').textContent = message; });
