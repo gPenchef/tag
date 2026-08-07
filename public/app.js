@@ -3,7 +3,7 @@ const config = window.GAME_CONFIG;
 const $ = (selector) => document.querySelector(selector);
 const screens = { lobby: $('#lobby-screen'), waiting: $('#waiting-screen'), game: $('#game-screen') };
 const canvas = $('#game'); const ctx = canvas.getContext('2d');
-let state = null; let myId = null; let sentInput = {}; let exitMenuOpen = false;
+let state = null; let myId = null; let sentInput = {}; let exitMenuOpen = false; let spectating = false;
 let selectedMapId = config.defaultMapId;
 const camera = {
   x: 0,
@@ -47,10 +47,12 @@ function renderMapPicker() {
 renderMapPicker();
 $('#create').onclick = () => sendLobby('lobby:create', { mapId: selectedMapId });
 $('#join').onclick = () => sendLobby('lobby:join', { code: $('#code').value });
+$('#spectate').onclick = () => sendLobby('lobby:spectate', { code: $('#code').value });
 $('#code').addEventListener('input', () => { $('#code').value = $('#code').value.toUpperCase(); });
+function myPlayer() { return state?.players.find((player) => player.id === myId); }
 function leaveLobby(confirmForfeit = true) {
   const activeMatch = !screens.game.classList.contains('hidden') && state?.phase !== 'match-over';
-  if (confirmForfeit && activeMatch && !confirm('Exit this match? Your opponent will win by forfeit.')) return;
+  if (confirmForfeit && activeMatch && !spectating && !confirm('Exit this match? Your opponent will win by forfeit.')) return;
   socket.emit('lobby:leave');
 }
 function clearInput() {
@@ -59,10 +61,10 @@ function clearInput() {
   socket.emit('input:update', input);
 }
 function hasIncomingRestartRequest() {
-  return state?.restartRequestPlayerId && state.restartRequestPlayerId !== myId;
+  return myPlayer() && state?.restartRequestPlayerId && state.restartRequestPlayerId !== myId;
 }
 function openExitMenu() {
-  if (state?.phase !== 'playing') return;
+  if (!state) return;
   exitMenuOpen = true;
   clearInput();
   render();
@@ -77,16 +79,31 @@ socket.on('connect', () => { myId = socket.id; });
 socket.on('lobby:error', (message) => { $('#lobby-error').textContent = message; });
 socket.on('lobby:left', () => {
   state = null;
+  spectating = false;
   camera.initialized = false;
   camera.lastUpdatedAt = 0;
   exitMenuOpen = false;
   clearInput();
   show('lobby');
 });
+socket.on('lobby:closed', () => {
+  state = null;
+  spectating = false;
+  camera.initialized = false;
+  camera.lastUpdatedAt = 0;
+  exitMenuOpen = false;
+  clearInput();
+  show('lobby');
+  $('#lobby-error').textContent = 'The lobby closed because all players left.';
+});
 socket.on('lobby:state', (lobby) => {
+  const spectators = lobby.spectators || [];
+  spectating = spectators.some((spectator) => spectator.id === myId);
   $('#lobby-code').textContent = lobby.code;
   $('#waiting-map').textContent = `Map: ${config.maps[lobby.mapId]?.name || 'Unknown'}`;
   $('#waiting-players').innerHTML = lobby.players.map((player, index) => `<div>${index + 1}. ${escapeHtml(player.name)}${player.id === myId ? ' (you)' : ''}</div>`).join('');
+  $('#waiting-spectators').innerHTML = spectators.map((spectator) => `<div>${escapeHtml(spectator.name)}${spectator.id === myId ? ' (you)' : ''}</div>`).join('');
+  $('#waiting-spectators-wrap').classList.toggle('hidden', spectators.length === 0);
   if (!lobby.hasMatch) show('waiting'); else show('game');
 });
 socket.on('game:state', (nextState) => {
@@ -100,12 +117,12 @@ socket.on('game:state', (nextState) => {
 function escapeHtml(text) { const node = document.createElement('span'); node.textContent = text; return node.innerHTML; }
 function setInput(event, active) {
   const keyMap = { Space: 'up', ArrowUp: 'up', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'dash', ShiftRight: 'dash', KeyE: 'realm' }; const key = keyMap[event.code];
-  if (!key || screens.game.classList.contains('hidden') || (active && (exitMenuOpen || hasIncomingRestartRequest()))) return;
+  if (!key || !myPlayer() || screens.game.classList.contains('hidden') || (active && (exitMenuOpen || hasIncomingRestartRequest()))) return;
   event.preventDefault(); input[key] = active;
   const signature = JSON.stringify(input); if (signature !== sentInput.signature) { sentInput.signature = signature; socket.emit('input:update', input); }
 }
 addEventListener('keydown', (event) => {
-  if (event.code === 'Escape' && !event.repeat && !screens.game.classList.contains('hidden') && state?.phase === 'playing') {
+  if (event.code === 'Escape' && !event.repeat && !screens.game.classList.contains('hidden') && state) {
     event.preventDefault();
     if (exitMenuOpen) closeExitMenu();
     else openExitMenu();
@@ -242,7 +259,8 @@ function render() {
     const cooldown = player.id === myId && cooldownMs > 0 ? ` · ${Math.ceil(cooldownMs / 100) / 10}s` : '';
     return `<div class="score"><span>${escapeHtml(player.name)}${player.id === myId ? ' · YOU' : ''}</span><b>${player.score}</b><em>${escapeHtml(power)}${cooldown}</em></div>`;
   }).join('');
-  const me = state.players.find((player) => player.id === myId);
+  $('#spectator-badge').classList.toggle('hidden', !spectating);
+  const me = myPlayer();
   canvas.style.cursor = state.phase === 'playing' && me?.power === 'snowball' ? 'crosshair' : 'default';
   const view = updateCamera();
   drawArena(view); drawProjectiles(view); drawPlayers(view); drawTimer(remaining); drawOverlay(remaining);
@@ -285,7 +303,12 @@ function drawPlayers(view) {
   ctx.save(); applyCamera(view);
   players.forEach((player) => {
     ctx.fillStyle = player.role === 'chaser' ? '#fb7185' : '#67e8f9';
+    if (spectating && player.inRealm) {
+      ctx.shadowColor = '#e879f9';
+      ctx.shadowBlur = 18;
+    }
     ctx.fillRect(player.position.x, player.position.y, config.player.width, config.player.height);
+    ctx.shadowBlur = 0;
   });
   ctx.restore();
   players.forEach((player) => {
@@ -296,7 +319,7 @@ function drawPlayers(view) {
     drawPowerMeter(player, centerX, topY - 25);
     ctx.fillStyle = '#e9edf6'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
     ctx.fillText(`${player.name}${player.id === myId ? ' (YOU)' : ''}`, centerX, topY - 8);
-    ctx.fillStyle = isChaser ? '#fb7185' : '#67e8f9'; ctx.font = 'bold 11px system-ui'; ctx.fillText(isChaser ? 'TAGGER' : 'RUNNER', centerX, bottomY + 14);
+    ctx.fillStyle = player.inRealm ? '#e879f9' : isChaser ? '#fb7185' : '#67e8f9'; ctx.font = 'bold 11px system-ui'; ctx.fillText(`${player.inRealm ? 'SHADOW ' : ''}${isChaser ? 'TAGGER' : 'RUNNER'}`, centerX, bottomY + 14);
     if (player.stunnedMs > 0) {
       const stunRatio = clamp(player.stunnedMs / config.powers.snowball.stunMs, 0, 1);
       const indicatorY = topY - 43;
@@ -335,11 +358,11 @@ function drawPowerMeter(player, centerX, centerY) {
 }
 function drawProjectiles(view) {
   ctx.save(); applyCamera(view);
-  ctx.fillStyle = '#f8fafc';
-  ctx.strokeStyle = '#bae6fd';
   ctx.lineWidth = 3;
-  const inRealm = state.players.find((player) => player.id === myId)?.inRealm || false;
-  (state.projectiles || []).filter((projectile) => projectile.inRealm === inRealm).forEach((projectile) => {
+  const inRealm = myPlayer()?.inRealm || false;
+  (state.projectiles || []).filter((projectile) => spectating || projectile.inRealm === inRealm).forEach((projectile) => {
+    ctx.fillStyle = projectile.inRealm ? '#f0abfc' : '#f8fafc';
+    ctx.strokeStyle = projectile.inRealm ? '#d946ef' : '#bae6fd';
     ctx.beginPath();
     ctx.arc(projectile.position.x, projectile.position.y, config.powers.snowball.projectileRadius, 0, Math.PI * 2);
     ctx.fill();
@@ -373,7 +396,7 @@ function drawOverlay(remaining) {
     drawRestartRequest();
     return;
   }
-  if (state.phase === 'playing' && exitMenuOpen) {
+  if (exitMenuOpen) {
     drawExitMenu();
     return;
   }
@@ -383,13 +406,15 @@ function drawOverlay(remaining) {
   }
   if (state.phase === 'countdown') {
     const count = Math.max(1, Math.ceil(remaining / 1000));
-    const role = state.players.find((player) => player.id === myId)?.role;
-    setOverlay(`countdown:${count}:${role}`, `<div><h2>${count}</h2><p>${role === 'chaser' ? 'You are the tagger. Touch the runner.' : 'You are the runner. Stay away.'}</p></div>`);
+    const role = myPlayer()?.role;
+    const message = spectating ? `Round ${state.round} starts soon.` : role === 'chaser' ? 'You are the tagger. Touch the runner.' : 'You are the runner. Stay away.';
+    setOverlay(`countdown:${count}:${role}:${spectating}`, `<div><h2>${count}</h2><p>${message}</p></div>`);
     return;
   }
   if (state.phase === 'result') {
     const mine = state.result.winnerId === myId;
-    setOverlay(`result:${state.round}:${state.result.winnerId}:${state.result.reason}`, `<div><h2>${mine ? 'Round won' : 'Round lost'}</h2><p>${escapeHtml(state.result.winnerName)} won by ${state.result.reason === 'tag' ? 'tagging' : 'surviving'}.</p></div>`);
+    const heading = spectating ? 'Round over' : mine ? 'Round won' : 'Round lost';
+    setOverlay(`result:${state.round}:${state.result.winnerId}:${state.result.reason}:${spectating}`, `<div><h2>${heading}</h2><p>${escapeHtml(state.result.winnerName)} won by ${state.result.reason === 'tag' ? 'tagging' : 'surviving'}.</p></div>`);
     return;
   }
   if (state.phase === 'match-over') {
@@ -398,29 +423,43 @@ function drawOverlay(remaining) {
     const votes = state.rematchVotes?.length || 0;
     const hasVoted = state.rematchVotes?.includes(myId);
     const label = hasVoted ? `Waiting for opponent (${votes}/2)` : votes ? `Accept rematch (${votes}/2)` : 'Rematch';
+    const rematchButton = spectating ? '' : `<button id="rematch"${hasVoted ? ' disabled' : ''}>${label}</button>`;
     const changed = setOverlay(
-      `match-over:${winner?.winnerId}:${winner?.reason}:${votes}:${hasVoted}`,
-      `<div><h2>${mine ? 'You win the match' : 'Match over'}</h2><p>${winner ? `${escapeHtml(winner.winnerName)} won${winner.reason === 'forfeit' ? ' by forfeit' : ''}.` : ''}</p><button id="rematch"${hasVoted ? ' disabled' : ''}>${label}</button></div>`
+      `match-over:${winner?.winnerId}:${winner?.reason}:${votes}:${hasVoted}:${spectating}`,
+      `<div><h2>${mine ? 'You win the match' : 'Match over'}</h2><p>${winner ? `${escapeHtml(winner.winnerName)} won${winner.reason === 'forfeit' ? ' by forfeit' : ''}.` : ''}</p>${rematchButton}</div>`
     );
-    if (changed && !hasVoted) $('#rematch').onclick = () => socket.emit('match:rematch');
+    if (changed && !spectating && !hasVoted) $('#rematch').onclick = () => socket.emit('match:rematch');
     return;
   }
   setOverlay('playing', '');
 }
 
 function drawExitMenu() {
+  if (spectating) {
+    const changed = setOverlay(
+      'exit-menu:spectator',
+      '<div class="exit-menu"><p class="eyebrow">Spectator controls</p><h2>Game menu</h2><div class="menu-actions"><button id="resume" class="primary">Resume</button><button id="quit-match" class="danger">Leave spectating</button></div></div>'
+    );
+    if (!changed) return;
+    $('#resume').onclick = closeExitMenu;
+    $('#quit-match').onclick = () => leaveLobby(false);
+    return;
+  }
   const restartRequested = state.restartRequestPlayerId === myId;
+  const canRestart = state.phase === 'playing';
   const changed = setOverlay(
-    `exit-menu:${restartRequested}`,
-    `<div class="exit-menu"><p class="eyebrow">Match controls</p><h2>Game menu</h2><div class="menu-actions"><button id="resume" class="primary">Resume</button><button id="restart-round"${restartRequested ? ' disabled' : ''}>${restartRequested ? 'Restart requested' : 'Ask to restart round'}</button><button id="quit-match" class="danger">Quit</button></div></div>`
+    `exit-menu:${restartRequested}:${canRestart}`,
+    `<div class="exit-menu"><p class="eyebrow">Match controls</p><h2>Game menu</h2><div class="menu-actions"><button id="resume" class="primary">Resume</button>${canRestart ? `<button id="restart-round"${restartRequested ? ' disabled' : ''}>${restartRequested ? 'Restart requested' : 'Ask to restart round'}</button>` : ''}<button id="quit-match" class="danger">Quit</button></div></div>`
   );
   if (!changed) return;
   $('#resume').onclick = closeExitMenu;
-  $('#restart-round').onclick = () => {
-    socket.emit('round:restart:request');
-    $('#restart-round').disabled = true;
-    $('#restart-round').textContent = 'Restart requested';
-  };
+  if (canRestart) {
+    $('#restart-round').onclick = () => {
+      socket.emit('round:restart:request');
+      $('#restart-round').disabled = true;
+      $('#restart-round').textContent = 'Restart requested';
+    };
+  }
   $('#quit-match').onclick = () => leaveLobby(false);
 }
 
@@ -436,10 +475,21 @@ function drawRestartRequest() {
 }
 
 function drawPowerSelection() {
-  const me = state.players.find((player) => player.id === myId);
+  const me = myPlayer();
   const runner = state.players.find((player) => player.role === 'runner');
   const isMyTurn = state.selectionPlayerId === myId;
   const revealed = runner.power ? `<p class="revealed">Runner chose <strong>${escapeHtml(config.powers[runner.power].name)}</strong>.</p>` : '';
+  if (!me) {
+    const chooser = state.players.find((player) => player.id === state.selectionPlayerId);
+    const heading = `${escapeHtml(chooser?.role === 'chaser' ? 'Tagger' : 'Runner')} is choosing`;
+    const body = runner.power ? revealed : '<p>The runner chooses first.</p>';
+    const powers = state.players.map((player) => player.power || '-').join(':');
+    setOverlay(
+      `power-select:spectator:${state.selectionPlayerId}:${powers}`,
+      `<div class="power-select"><p class="eyebrow">Round ${state.round} · Spectating</p><h2>${heading}</h2><p class="eyebrow">Map: ${escapeHtml(activeMap().name)}</p>${body}</div>`
+    );
+    return;
+  }
   let heading;
   let body;
 

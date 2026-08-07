@@ -12,7 +12,13 @@ const {
   tickMatch,
   publicMatch
 } = require('../server/game');
-const { createLobby, joinLobby, removePlayer } = require('../server/lobbies');
+const {
+  createLobby,
+  joinLobby,
+  spectateLobby,
+  removePlayer,
+  removeSpectator
+} = require('../server/lobbies');
 const CONFIG = require('../shared/game-config');
 const JSON_CONFIG = require('../shared/game-config.json');
 const { validateMap, loadExternalMaps } = require('../shared/map-files');
@@ -54,6 +60,7 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
   assert.equal(JSON_CONFIG.maps, undefined);
   assert.equal(CONFIG.defaultMapId, 'spire');
   assert.deepEqual(JSON_CONFIG.enabledMapIds, ['spire', 'crossroads', 'overpass']);
+  assert.equal(CONFIG.maxSpectatorsPerLobby, 8);
   assert.deepEqual(Object.keys(CONFIG.maps), ['spire', 'crossroads', 'overpass']);
   assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.width), [2250, 1680, 2880]);
   assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.height), [1280, 920, 1040]);
@@ -179,6 +186,39 @@ test('the lobby creator map choice is used when the second player starts the mat
 
   removePlayer(lobby, 'host');
   removePlayer(lobby, 'guest');
+});
+
+test('spectators can watch without occupying a player slot or changing the match', () => {
+  const lobby = createLobby({ id: 'host', name: 'Host' }, 'spire');
+  const spectatorResult = spectateLobby(lobby.code, { id: 'viewer', name: 'Viewer' });
+  const playerResult = joinLobby(lobby.code, { id: 'guest', name: 'Guest' });
+  const originalMatch = lobby.match;
+  const lateSpectatorResult = spectateLobby(lobby.code, { id: 'late-viewer', name: 'Late Viewer' });
+
+  assert.equal(spectatorResult.lobby, lobby);
+  assert.equal(playerResult.lobby, lobby);
+  assert.equal(lateSpectatorResult.lobby, lobby);
+  assert.deepEqual(lobby.players.map((player) => player.id), ['host', 'guest']);
+  assert.deepEqual(lobby.spectators.map((spectator) => spectator.id), ['viewer', 'late-viewer']);
+  assert.equal(lobby.match, originalMatch);
+  assert.equal(lobby.match.players.some((player) => player.id === 'viewer'), false);
+
+  removeSpectator(lobby, 'viewer');
+  assert.deepEqual(lobby.spectators.map((spectator) => spectator.id), ['late-viewer']);
+  removePlayer(lobby, 'host');
+  removePlayer(lobby, 'guest');
+});
+
+test('spectators need unique names and are limited by configuration', () => {
+  const lobby = createLobby({ id: 'host', name: 'Host' }, 'spire');
+
+  assert.match(spectateLobby(lobby.code, { id: 'duplicate', name: 'host' }).error, /different display name/);
+  for (let index = 0; index < CONFIG.maxSpectatorsPerLobby; index += 1) {
+    assert.equal(spectateLobby(lobby.code, { id: `viewer-${index}`, name: `Viewer ${index}` }).lobby, lobby);
+  }
+  assert.match(spectateLobby(lobby.code, { id: 'extra', name: 'Extra' }).error, /too many spectators/);
+
+  removePlayer(lobby, 'host');
 });
 
 test('touching the runner immediately awards the chaser', () => {

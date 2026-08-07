@@ -93,6 +93,9 @@ select { text-transform: none; }
 #lobby-code { letter-spacing: .2em; font-size: 2.2rem; }
 .players-list { margin: 1.5rem 0; display: grid; gap: .5rem; }
 .players-list div { padding: .7rem; background: #222833; border-radius: 5px; }
+.list-label { margin: 1.5rem 0 -.9rem; color: #98a2b3; font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.spectators-list { margin-top: 1.5rem; }
+.spectators-list div { color: #c4b5fd; background: #211d31; }
 
 body.game-active {
   display: block;
@@ -146,6 +149,22 @@ canvas {
   display: flex;
   justify-content: space-between;
   gap: 6rem;
+}
+
+.spectator-badge {
+  position: absolute;
+  bottom: clamp(.6rem, 2.2vw, 1.25rem);
+  left: 50%;
+  padding: .4rem .7rem;
+  transform: translateX(-50%);
+  border: 1px solid rgba(196, 181, 253, .55);
+  border-radius: 999px;
+  color: #ddd6fe;
+  background: rgba(30, 25, 48, .82);
+  font-size: clamp(.62rem, 1.5vw, .78rem);
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
 }
 
 .score {

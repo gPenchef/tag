@@ -11,20 +11,21 @@
     <header><a href="/" class="brand">TAG<span>.</span></a><p>Two-player platform chase</p></header>
     <section id="lobby-screen" class="panel lobby-panel">
       <h1>Find a player.</h1>
-      <p class="muted">Create a private room or join one with a code.</p>
+      <p class="muted">Create a private room, join as a player, or watch with a code.</p>
       <label>Your name<input id="name" maxlength="18" autocomplete="nickname" placeholder="Player name"></label>
       <div class="map-picker"><span class="map-label">Map</span><div id="map-list" class="map-list" role="radiogroup" aria-label="Choose a map"></div></div>
-      <div class="lobby-actions"><button id="create" class="primary">Create lobby</button><span>or</span><div class="join"><input id="code" maxlength="5" placeholder="CODE"><button id="join">Join</button></div></div>
+      <div class="lobby-actions"><button id="create" class="primary">Create lobby</button><span>or</span><div class="join"><input id="code" maxlength="5" placeholder="CODE"><button id="join">Join</button><button id="spectate">Spectate</button></div></div>
       <p id="lobby-error" class="error" aria-live="polite"></p>
     </section>
     <section id="waiting-screen" class="panel hidden">
-      <p class="eyebrow">Lobby code</p><h1 id="lobby-code">-----</h1><p>Share this code with one friend.</p><p id="waiting-map" class="map-choice"></p><div id="waiting-players" class="players-list"></div><button id="leave">Leave lobby</button>
+      <p class="eyebrow">Lobby code</p><h1 id="lobby-code">-----</h1><p>Share this code with players or spectators.</p><p id="waiting-map" class="map-choice"></p><p class="list-label">Players</p><div id="waiting-players" class="players-list"></div><div id="waiting-spectators-wrap" class="hidden"><p class="list-label">Spectators</p><div id="waiting-spectators" class="players-list spectators-list"></div></div><button id="leave">Leave lobby</button>
     </section>
     <section id="game-screen" class="hidden">
       <div class="canvas-wrap">
         <canvas id="game" width="900" height="560"></canvas>
         <div class="hud" aria-live="polite">
           <div id="scoreboard"></div>
+          <div id="spectator-badge" class="spectator-badge hidden">Spectating</div>
         </div>
         <div id="overlay" class="overlay"></div>
       </div>

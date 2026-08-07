@@ -1,6 +1,7 @@
 {
   "defaultMapId": "spire",
   "enabledMapIds": ["spire", "crossroads", "overpass"],
+  "maxSpectatorsPerLobby": 8,
   "camera": {
     "minViewWidth": 700,
     "paddingX": 220,
