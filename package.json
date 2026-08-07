@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "mapmaker": "node mapmaker/server.js",
+    "map:import": "node tools/import-map.js"
   },
   "dependencies": {
     "express": "^4.21.2",

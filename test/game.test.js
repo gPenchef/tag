@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
   createMatch,
   selectPower,
@@ -12,6 +15,8 @@ const {
 const { createLobby, joinLobby, removePlayer } = require('../server/lobbies');
 const CONFIG = require('../shared/game-config');
 const JSON_CONFIG = require('../shared/game-config.json');
+const { validateMap, loadExternalMaps } = require('../shared/map-files');
+const { selectEnabledMaps } = require('../shared/map-selection');
 const TEST_MAP = CONFIG.maps[CONFIG.defaultMapId];
 
 function players() { return [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }]; }
@@ -45,8 +50,10 @@ test('the runner chooses a power before the informed chaser', () => {
 });
 
 test('every selectable map keeps its geometry, jump pads, and spawns inside its own arena', () => {
-  assert.equal(CONFIG, JSON_CONFIG);
+  assert.notEqual(CONFIG, JSON_CONFIG);
+  assert.equal(JSON_CONFIG.maps, undefined);
   assert.equal(CONFIG.defaultMapId, 'spire');
+  assert.deepEqual(JSON_CONFIG.enabledMapIds, ['spire', 'crossroads', 'overpass']);
   assert.deepEqual(Object.keys(CONFIG.maps), ['spire', 'crossroads', 'overpass']);
   assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.width), [2250, 1680, 2880]);
   assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.height), [1280, 920, 1040]);
@@ -90,6 +97,54 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
       ));
     });
   });
+});
+
+test('only map ids enabled in configuration are exposed to the game', () => {
+  const loadedMaps = { spire: { id: 'spire' }, hidden: { id: 'hidden' } };
+  assert.deepEqual(selectEnabledMaps(loadedMaps, ['spire'], 'spire'), { spire: loadedMaps.spire });
+  assert.throws(() => selectEnabledMaps(loadedMaps, ['hidden'], 'spire'), /defaultMapId/);
+  assert.throws(() => selectEnabledMaps(loadedMaps, ['spire', 'missing'], 'spire'), /missing map/);
+});
+
+test('a map export is validated before it can be imported', () => {
+  const validMap = {
+    id: 'friend-map',
+    name: 'Friend Map',
+    description: 'A map ready for import.',
+    arena: { width: 1000, height: 600 },
+    theme: { skyTop: '#000000', skyBottom: '#111111', accent: '#ffffff' },
+    platforms: [{ x: 0, y: 560, width: 1000, height: 40 }],
+    jumpPads: [],
+    spawns: [{ x: 100, y: 540 }, { x: 880, y: 540 }]
+  };
+
+  assert.deepEqual(validateMap(validMap, CONFIG), []);
+  assert.match(validateMap({ ...validMap, id: 'Friend Map' }, CONFIG).join(' '), /Map id/);
+  assert.match(validateMap({ ...validMap, spawns: [validMap.spawns[0]] }, CONFIG).join(' '), /exactly two/);
+  assert.match(validateMap({ ...validMap, platforms: [{ x: 0, y: 560, width: 1001, height: 40 }] }, CONFIG).join(' '), /platform/);
+  assert.match(validateMap({ ...validMap, spawns: [{ x: 100, y: 550 }, validMap.spawns[1]] }, CONFIG).join(' '), /cannot overlap/);
+  assert.match(validateMap({ ...validMap, jumpPads: [{ x: 400, y: 500, width: 40, height: 10, launchSpeed: 900 }] }, CONFIG).join(' '), /rest on top/);
+});
+
+test('valid custom map exports load from the maps directory', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-tag-maps-'));
+  const map = {
+    id: 'custom-test-map',
+    name: 'Custom Test Map',
+    description: 'A map loaded from a separate file.',
+    arena: { width: 1000, height: 600 },
+    theme: { skyTop: '#000000', skyBottom: '#111111', accent: '#ffffff' },
+    platforms: [{ x: 0, y: 560, width: 1000, height: 40 }],
+    jumpPads: [],
+    spawns: [{ x: 100, y: 540 }, { x: 880, y: 540 }]
+  };
+
+  try {
+    fs.writeFileSync(path.join(directory, 'custom-test-map.json'), JSON.stringify(map));
+    assert.deepEqual(loadExternalMaps(CONFIG, directory), { 'custom-test-map': map });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('a match uses its selected map for identity, spawns, bounds, and public state', () => {

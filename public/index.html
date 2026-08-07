@@ -13,7 +13,7 @@
       <h1>Find a player.</h1>
       <p class="muted">Create a private room or join one with a code.</p>
       <label>Your name<input id="name" maxlength="18" autocomplete="nickname" placeholder="Player name"></label>
-      <label>Map<select id="map"></select><span id="map-description" class="field-hint"></span></label>
+      <div class="map-picker"><span class="map-label">Map</span><div id="map-list" class="map-list" role="radiogroup" aria-label="Choose a map"></div></div>
       <div class="lobby-actions"><button id="create" class="primary">Create lobby</button><span>or</span><div class="join"><input id="code" maxlength="5" placeholder="CODE"><button id="join">Join</button></div></div>
       <p id="lobby-error" class="error" aria-live="polite"></p>
     </section>

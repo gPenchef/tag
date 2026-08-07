@@ -1,0 +1,141 @@
+{
+  "id": "overpass",
+  "name": "Overpass",
+  "description": "A wide arena built around momentum, bridges, and launch-pad rotations.",
+  "arena": {
+    "width": 2880,
+    "height": 1040
+  },
+  "theme": {
+    "skyTop": "#26351d",
+    "skyBottom": "#0c1209",
+    "accent": "#bef264"
+  },
+  "platforms": [
+    {
+      "x": 0,
+      "y": 1000,
+      "width": 2880,
+      "height": 40
+    },
+    {
+      "x": 120,
+      "y": 820,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 680,
+      "y": 720,
+      "width": 360,
+      "height": 24
+    },
+    {
+      "x": 1260,
+      "y": 790,
+      "width": 360,
+      "height": 24
+    },
+    {
+      "x": 1840,
+      "y": 720,
+      "width": 360,
+      "height": 24
+    },
+    {
+      "x": 2340,
+      "y": 820,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 360,
+      "y": 500,
+      "width": 360,
+      "height": 24
+    },
+    {
+      "x": 920,
+      "y": 420,
+      "width": 400,
+      "height": 24
+    },
+    {
+      "x": 1560,
+      "y": 420,
+      "width": 400,
+      "height": 24
+    },
+    {
+      "x": 2160,
+      "y": 500,
+      "width": 360,
+      "height": 24
+    },
+    {
+      "x": 700,
+      "y": 190,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 1380,
+      "y": 150,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 2060,
+      "y": 190,
+      "width": 420,
+      "height": 24
+    }
+  ],
+  "jumpPads": [
+    {
+      "x": 560,
+      "y": 990,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 930
+    },
+    {
+      "x": 1420,
+      "y": 990,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 1000
+    },
+    {
+      "x": 2260,
+      "y": 990,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 930
+    },
+    {
+      "x": 1070,
+      "y": 410,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 900
+    },
+    {
+      "x": 1750,
+      "y": 410,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 900
+    }
+  ],
+  "spawns": [
+    {
+      "x": 180,
+      "y": 980
+    },
+    {
+      "x": 2680,
+      "y": 980
+    }
+  ]
+}

@@ -4,6 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const screens = { lobby: $('#lobby-screen'), waiting: $('#waiting-screen'), game: $('#game-screen') };
 const canvas = $('#game'); const ctx = canvas.getContext('2d');
 let state = null; let myId = null; let sentInput = {}; let exitMenuOpen = false;
+let selectedMapId = config.defaultMapId;
 const camera = {
   x: 0,
   y: 0,
@@ -22,12 +23,29 @@ function show(name) {
 function nameValue() { return $('#name').value.trim(); }
 function clearError() { $('#lobby-error').textContent = ''; }
 function sendLobby(event, extra = {}) { clearError(); socket.emit(event, { name: nameValue(), ...extra }); }
-function updateMapDescription() { $('#map-description').textContent = config.maps[$('#map').value]?.description || ''; }
-$('#map').innerHTML = Object.entries(config.maps).map(([mapId, map]) => `<option value="${escapeHtml(mapId)}">${escapeHtml(map.name)} · ${map.arena.width}×${map.arena.height}</option>`).join('');
-$('#map').value = config.defaultMapId;
-$('#map').addEventListener('change', updateMapDescription);
-updateMapDescription();
-$('#create').onclick = () => sendLobby('lobby:create', { mapId: $('#map').value });
+function mapPreview(map) {
+  const rectangles = map.platforms.map((platform) =>
+    `<rect x="${platform.x}" y="${platform.y}" width="${platform.width}" height="${platform.height}" fill="#343d4c" />`
+  ).join('');
+  const pads = map.jumpPads.map((pad) =>
+    `<rect x="${pad.x}" y="${pad.y}" width="${pad.width}" height="${pad.height}" fill="#a3e635" />`
+  ).join('');
+  const spawns = map.spawns.map((spawn, index) =>
+    `<rect x="${spawn.x}" y="${spawn.y}" width="${config.player.width}" height="${config.player.height}" fill="${index ? '#fb7185' : '#67e8f9'}" />`
+  ).join('');
+  return `<svg class="map-preview" viewBox="0 0 ${map.arena.width} ${map.arena.height}" role="img" aria-label="${escapeHtml(map.name)} map preview"><rect width="${map.arena.width}" height="${map.arena.height}" fill="${escapeHtml(map.theme.skyBottom)}" /><rect width="${map.arena.width}" height="${map.arena.height}" fill="${escapeHtml(map.theme.skyTop)}" opacity=".45" />${rectangles}${pads}${spawns}</svg>`;
+}
+function renderMapPicker() {
+  $('#map-list').innerHTML = Object.entries(config.maps).map(([mapId, map]) => `<button type="button" class="map-card${mapId === selectedMapId ? ' selected' : ''}" data-map-id="${escapeHtml(mapId)}" role="radio" aria-checked="${mapId === selectedMapId}">${mapPreview(map)}<span class="map-card-name">${escapeHtml(map.name)}</span><span class="map-card-description">${escapeHtml(map.description)}</span></button>`).join('');
+  document.querySelectorAll('.map-card').forEach((card) => {
+    card.onclick = () => {
+      selectedMapId = card.dataset.mapId;
+      renderMapPicker();
+    };
+  });
+}
+renderMapPicker();
+$('#create').onclick = () => sendLobby('lobby:create', { mapId: selectedMapId });
 $('#join').onclick = () => sendLobby('lobby:join', { code: $('#code').value });
 $('#code').addEventListener('input', () => { $('#code').value = $('#code').value.toUpperCase(); });
 function leaveLobby(confirmForfeit = true) {

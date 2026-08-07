@@ -1,0 +1,116 @@
+{
+  "id": "crossroads",
+  "name": "Crossroads",
+  "description": "A compact arena with fast loops and a contested center.",
+  "arena": {
+    "width": 1680,
+    "height": 920
+  },
+  "theme": {
+    "skyTop": "#30203d",
+    "skyBottom": "#100c18",
+    "accent": "#f0abfc"
+  },
+  "platforms": [
+    {
+      "x": 0,
+      "y": 880,
+      "width": 1680,
+      "height": 40
+    },
+    {
+      "x": 90,
+      "y": 700,
+      "width": 320,
+      "height": 24
+    },
+    {
+      "x": 510,
+      "y": 570,
+      "width": 260,
+      "height": 24
+    },
+    {
+      "x": 910,
+      "y": 570,
+      "width": 260,
+      "height": 24
+    },
+    {
+      "x": 1270,
+      "y": 700,
+      "width": 320,
+      "height": 24
+    },
+    {
+      "x": 170,
+      "y": 400,
+      "width": 300,
+      "height": 24
+    },
+    {
+      "x": 690,
+      "y": 350,
+      "width": 300,
+      "height": 24
+    },
+    {
+      "x": 1210,
+      "y": 400,
+      "width": 300,
+      "height": 24
+    },
+    {
+      "x": 450,
+      "y": 170,
+      "width": 260,
+      "height": 24
+    },
+    {
+      "x": 970,
+      "y": 170,
+      "width": 260,
+      "height": 24
+    }
+  ],
+  "jumpPads": [
+    {
+      "x": 300,
+      "y": 870,
+      "width": 55,
+      "height": 10,
+      "launchSpeed": 900
+    },
+    {
+      "x": 1325,
+      "y": 870,
+      "width": 55,
+      "height": 10,
+      "launchSpeed": 900
+    },
+    {
+      "x": 805,
+      "y": 870,
+      "width": 70,
+      "height": 10,
+      "launchSpeed": 1000
+    },
+    {
+      "x": 805,
+      "y": 340,
+      "width": 70,
+      "height": 10,
+      "launchSpeed": 900
+    }
+  ],
+  "spawns": [
+    {
+      "x": 130,
+      "y": 860
+    },
+    {
+      "x": 1530,
+      "y": 860
+    }
+  ]
+}

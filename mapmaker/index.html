@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TAG Mapmaker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><p class="eyebrow">Platform Tag tools</p><h1>Mapmaker<span>.</span></h1></div>
+    <div class="file-actions">
+      <button id="new-map" type="button">New map</button>
+      <label class="button" for="import-map">Open JSON</label>
+      <input id="import-map" type="file" accept="application/json,.json" hidden>
+      <button id="export-map" class="primary" type="button">Export JSON</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <section>
+        <h2>Map details</h2>
+        <label>Map ID<input id="map-id" maxlength="48" value="untitled-map"></label>
+        <label>Name<input id="map-name" maxlength="60" value="Untitled Map"></label>
+        <label>Description<textarea id="map-description" maxlength="180" rows="3">A custom arena.</textarea></label>
+        <div class="field-row"><label>Width<input id="arena-width" type="number" min="400" max="6000" step="10"></label><label>Height<input id="arena-height" type="number" min="300" max="4000" step="10"></label></div>
+        <label>Grid size<select id="grid-size"><option value="5">5</option><option value="10">10</option><option value="20" selected>20</option><option value="40">40</option></select></label>
+      </section>
+
+      <section>
+        <h2>Theme</h2>
+        <div class="color-row"><label>Sky top<input id="sky-top" type="color"></label><label>Sky bottom<input id="sky-bottom" type="color"></label><label>Accent<input id="accent" type="color"></label></div>
+      </section>
+
+      <section>
+        <h2>Tools</h2>
+        <div class="tool-grid" role="toolbar" aria-label="Map tools">
+          <button class="tool active" data-tool="select" type="button"><kbd>1</kbd>Select</button>
+          <button class="tool" data-tool="platform" type="button"><kbd>2</kbd>Platform</button>
+          <button class="tool" data-tool="jump-pad" type="button"><kbd>3</kbd>Jump pad</button>
+          <button class="tool" data-tool="spawn-0" type="button"><kbd>4</kbd>Spawn A</button>
+          <button class="tool" data-tool="spawn-1" type="button"><kbd>5</kbd>Spawn B</button>
+          <button class="tool danger" data-tool="erase" type="button"><kbd>6</kbd>Erase</button>
+        </div>
+        <p id="tool-help" class="hint">Click an object to select it, then drag to move it.</p>
+        <div class="quick-actions"><button id="add-floor" type="button">Add floor</button><button id="undo" type="button">Undo</button><button id="redo" type="button">Redo</button></div>
+      </section>
+
+      <section id="object-inspector" class="hidden">
+        <div class="section-heading"><h2>Selected object</h2><button id="delete-selected" class="text-danger" type="button">Delete</button></div>
+        <p id="selected-type" class="selected-type"></p>
+        <div class="field-row"><label>X<input id="object-x" type="number" step="1"></label><label>Y<input id="object-y" type="number" step="1"></label></div>
+        <div id="object-size" class="field-row"><label>Width<input id="object-width" type="number" min="1" step="1"></label><label>Height<input id="object-height" type="number" min="1" step="1"></label></div>
+        <label id="launch-speed-row">Launch speed<input id="object-launch-speed" type="number" min="1" step="10"></label>
+      </section>
+    </aside>
+
+    <section class="editor-panel">
+      <div class="editor-meta"><div><strong id="editor-map-name">Untitled Map</strong><span id="editor-size"></span></div><span id="pointer-position">x 0 · y 0</span></div>
+      <div class="canvas-frame"><canvas id="editor" width="1200" height="675" aria-label="Map editing canvas"></canvas></div>
+      <div id="status" class="status" aria-live="polite">Ready. Choose a tool to start building.</div>
+    </section>
+  </main>
+
+  <script src="/mapmaker-config.js"></script>
+  <script src="/map-schema.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

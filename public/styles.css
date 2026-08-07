@@ -59,6 +59,16 @@ header p, .muted { color: #98a2b3; }
 h1 { margin: .15rem 0 .5rem; }
 label { display: grid; gap: .45rem; margin: 1.8rem 0; font-weight: 700; }
 
+.map-picker { margin: 1.8rem 0; }
+.map-label { display: block; margin-bottom: .45rem; font-weight: 700; }
+.map-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.map-card { min-width: 0; padding: .45rem; border-color: #3d4656; background: #10141b; text-align: left; }
+.map-card:hover { border-color: #67e8f9; background: #18222c; }
+.map-card.selected { border-color: #67e8f9; box-shadow: 0 0 0 1px #67e8f9; }
+.map-preview { display: block; width: 100%; aspect-ratio: 16 / 9; margin-bottom: .55rem; border-radius: 4px; background: #0a0d12; }
+.map-card-name { display: block; color: #e9edf6; font-size: .82rem; font-weight: 800; }
+.map-card-description { display: block; margin-top: .22rem; color: #98a2b3; font-size: .66rem; font-weight: 500; line-height: 1.3; }
+
 input, select {
   width: 100%;
   padding: .75rem;
@@ -203,6 +213,7 @@ canvas {
   .panel { padding: 1.25rem; }
   #scoreboard { gap: 5rem; }
   .score { padding: .4rem .5rem; }
+  .map-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .power-grid { grid-template-columns: 1fr; }
   .power-option { min-height: 0; }
 }
