@@ -13,7 +13,7 @@ body {
   place-items: center;
 }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 
 button {
   cursor: pointer;
@@ -59,7 +59,7 @@ header p, .muted { color: #98a2b3; }
 h1 { margin: .15rem 0 .5rem; }
 label { display: grid; gap: .45rem; margin: 1.8rem 0; font-weight: 700; }
 
-input {
+input, select {
   width: 100%;
   padding: .75rem;
   color: inherit;
@@ -68,6 +68,10 @@ input {
   border-radius: 6px;
   text-transform: uppercase;
 }
+
+select { text-transform: none; }
+.field-hint { color: #98a2b3; font-size: .78rem; font-weight: 500; line-height: 1.4; }
+.map-choice { color: #67e8f9; font-weight: 800; }
 
 #name { text-transform: none; }
 .lobby-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
@@ -176,6 +180,27 @@ canvas {
 .overlay p { margin: 0; }
 .overlay button { margin-top: 1rem; pointer-events: auto; }
 .overlay button:disabled { cursor: default; opacity: .65; }
+
+.game-exit {
+  position: absolute;
+  right: clamp(.6rem, 2.2vw, 1.25rem);
+  bottom: clamp(.6rem, 2.2vw, 1.25rem);
+  z-index: 2;
+  padding: .55rem .8rem;
+  border-color: rgba(255, 255, 255, .2);
+  background: rgba(10, 13, 18, .8);
+  color: #c8cfda;
+  font-size: clamp(.68rem, 1.5vw, .82rem);
+}
+
+.game-exit:hover { border-color: #fb7185; background: rgba(89, 26, 41, .9); color: #fff; }
+
+.exit-menu { width: min(88vw, 360px); }
+.exit-menu h2 { margin-bottom: .8rem; }
+.menu-actions { display: grid; gap: .65rem; margin-top: 1.25rem; }
+.menu-actions button { width: 100%; margin-top: 0; }
+.menu-actions .danger { border-color: rgba(251, 113, 133, .65); color: #fecdd3; }
+.menu-actions .danger:hover { background: #7f1d35; color: #fff; }
 
 .power-select { width: min(92vw, 580px); }
 .power-select .eyebrow { margin-bottom: .35rem; text-transform: uppercase; }

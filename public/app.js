@@ -3,17 +3,17 @@ const config = window.GAME_CONFIG;
 const $ = (selector) => document.querySelector(selector);
 const screens = { lobby: $('#lobby-screen'), waiting: $('#waiting-screen'), game: $('#game-screen') };
 const canvas = $('#game'); const ctx = canvas.getContext('2d');
-let state = null; let myId = null; let sentInput = {};
+let state = null; let myId = null; let sentInput = {}; let exitMenuOpen = false;
 const camera = {
   x: 0,
   y: 0,
-  width: config.arena.width,
-  height: config.arena.height,
+  width: config.maps[config.defaultMapId].arena.width,
+  height: config.maps[config.defaultMapId].arena.height,
   zoomOutVelocity: 0,
   lastUpdatedAt: 0,
   initialized: false
 };
-const input = { up: false, down: false, left: false, right: false, dash: false };
+const input = { up: false, down: false, left: false, right: false, dash: false, realm: false };
 
 function show(name) {
   Object.entries(screens).forEach(([key, screen]) => screen.classList.toggle('hidden', key !== name));
@@ -22,51 +22,134 @@ function show(name) {
 function nameValue() { return $('#name').value.trim(); }
 function clearError() { $('#lobby-error').textContent = ''; }
 function sendLobby(event, extra = {}) { clearError(); socket.emit(event, { name: nameValue(), ...extra }); }
-$('#create').onclick = () => sendLobby('lobby:create');
+function updateMapDescription() { $('#map-description').textContent = config.maps[$('#map').value]?.description || ''; }
+$('#map').innerHTML = Object.entries(config.maps).map(([mapId, map]) => `<option value="${escapeHtml(mapId)}">${escapeHtml(map.name)} · ${map.arena.width}×${map.arena.height}</option>`).join('');
+$('#map').value = config.defaultMapId;
+$('#map').addEventListener('change', updateMapDescription);
+updateMapDescription();
+$('#create').onclick = () => sendLobby('lobby:create', { mapId: $('#map').value });
 $('#join').onclick = () => sendLobby('lobby:join', { code: $('#code').value });
 $('#code').addEventListener('input', () => { $('#code').value = $('#code').value.toUpperCase(); });
-$('#leave').onclick = () => socket.emit('lobby:leave');
+function leaveLobby(confirmForfeit = true) {
+  const activeMatch = !screens.game.classList.contains('hidden') && state?.phase !== 'match-over';
+  if (confirmForfeit && activeMatch && !confirm('Exit this match? Your opponent will win by forfeit.')) return;
+  socket.emit('lobby:leave');
+}
+function clearInput() {
+  Object.keys(input).forEach((key) => input[key] = false);
+  sentInput = {};
+  socket.emit('input:update', input);
+}
+function hasIncomingRestartRequest() {
+  return state?.restartRequestPlayerId && state.restartRequestPlayerId !== myId;
+}
+function openExitMenu() {
+  if (state?.phase !== 'playing') return;
+  exitMenuOpen = true;
+  clearInput();
+  render();
+}
+function closeExitMenu() {
+  exitMenuOpen = false;
+  render();
+}
+$('#leave').onclick = leaveLobby;
+$('#leave-game').onclick = openExitMenu;
 
 socket.on('connect', () => { myId = socket.id; });
 socket.on('lobby:error', (message) => { $('#lobby-error').textContent = message; });
-socket.on('lobby:left', () => { state = null; camera.initialized = false; show('lobby'); });
+socket.on('lobby:left', () => {
+  state = null;
+  camera.initialized = false;
+  camera.lastUpdatedAt = 0;
+  exitMenuOpen = false;
+  clearInput();
+  show('lobby');
+});
 socket.on('lobby:state', (lobby) => {
   $('#lobby-code').textContent = lobby.code;
+  $('#waiting-map').textContent = `Map: ${config.maps[lobby.mapId]?.name || 'Unknown'}`;
   $('#waiting-players').innerHTML = lobby.players.map((player, index) => `<div>${index + 1}. ${escapeHtml(player.name)}${player.id === myId ? ' (you)' : ''}</div>`).join('');
   if (!lobby.hasMatch) show('waiting'); else show('game');
 });
-socket.on('game:state', (nextState) => { state = nextState; show('game'); render(); });
+socket.on('game:state', (nextState) => {
+  if (state?.mapId !== nextState.mapId) camera.initialized = false;
+  state = nextState;
+  if (state.phase !== 'playing') exitMenuOpen = false;
+  show('game');
+  render();
+});
 
 function escapeHtml(text) { const node = document.createElement('span'); node.textContent = text; return node.innerHTML; }
 function setInput(event, active) {
-  const keyMap = { Space: 'up', ArrowUp: 'up', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'dash', ShiftRight: 'dash' }; const key = keyMap[event.code];
-  if (!key) return; event.preventDefault(); input[key] = active;
+  const keyMap = { Space: 'up', ArrowUp: 'up', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'dash', ShiftRight: 'dash', KeyE: 'realm' }; const key = keyMap[event.code];
+  if (!key || screens.game.classList.contains('hidden') || (active && (exitMenuOpen || hasIncomingRestartRequest()))) return;
+  event.preventDefault(); input[key] = active;
   const signature = JSON.stringify(input); if (signature !== sentInput.signature) { sentInput.signature = signature; socket.emit('input:update', input); }
 }
-addEventListener('keydown', (event) => setInput(event, true)); addEventListener('keyup', (event) => setInput(event, false));
-addEventListener('blur', () => { Object.keys(input).forEach((key) => input[key] = false); socket.emit('input:update', input); });
+addEventListener('keydown', (event) => {
+  if (event.code === 'Escape' && !event.repeat && !screens.game.classList.contains('hidden') && state?.phase === 'playing') {
+    event.preventDefault();
+    if (exitMenuOpen) closeExitMenu();
+    else openExitMenu();
+    return;
+  }
+  setInput(event, true);
+});
+addEventListener('keyup', (event) => setInput(event, false));
+addEventListener('blur', clearInput);
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || state?.phase !== 'playing') return;
+  const me = state.players.find((player) => player.id === myId);
+  if (me?.power !== 'snowball' || me.snowballCooldownMs > 0 || me.stunnedMs > 0) return;
+  const bounds = canvas.getBoundingClientRect();
+  const canvasX = (event.clientX - bounds.left) * canvas.width / bounds.width;
+  const canvasY = (event.clientY - bounds.top) * canvas.height / bounds.height;
+  socket.emit('power:use', {
+    target: {
+      x: camera.x + canvasX / canvas.width * camera.width,
+      y: camera.y + canvasY / canvas.height * camera.height
+    }
+  });
+});
 
 function formatTime(ms) { const seconds = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; }
 function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
+function clampCameraPosition(position, viewSize, arenaSize) {
+  if (viewSize >= arenaSize) return (arenaSize - viewSize) / 2;
+  return clamp(position, 0, arenaSize - viewSize);
+}
+function activeMap() { return config.maps[state?.mapId] || config.maps[config.defaultMapId]; }
+function visiblePlayers() {
+  const me = state.players.find((player) => player.id === myId);
+  if (!me) return state.players;
+  return state.players.filter((player) => player.inRealm === me.inRealm);
+}
+function realmsAreSeparated() {
+  return state.players.length > 1 && state.players.some((player) => player.inRealm !== state.players[0].inRealm);
+}
 function updateCamera() {
+  const map = activeMap();
   const now = performance.now();
   const dt = camera.lastUpdatedAt ? Math.min((now - camera.lastUpdatedAt) / 1000, 0.05) : 0;
   camera.lastUpdatedAt = now;
   const aspect = canvas.width / canvas.height;
-  const left = Math.min(...state.players.map((player) => player.position.x));
-  const right = Math.max(...state.players.map((player) => player.position.x + config.player.width));
-  const top = Math.min(...state.players.map((player) => player.position.y));
-  const bottom = Math.max(...state.players.map((player) => player.position.y + config.player.height));
+  const players = visiblePlayers();
+  const left = Math.min(...players.map((player) => player.position.x));
+  const right = Math.max(...players.map((player) => player.position.x + config.player.width));
+  const top = Math.min(...players.map((player) => player.position.y));
+  const bottom = Math.max(...players.map((player) => player.position.y + config.player.height));
   const horizontalTargetWidth = right - left + config.camera.paddingX * 2;
   const requiredHeight = bottom - top + config.camera.paddingY * 2;
-  const targetWidth = clamp(
-    Math.max(config.camera.minViewWidth, horizontalTargetWidth, requiredHeight * aspect),
-    config.camera.minViewWidth,
-    config.arena.width
-  );
+  const realmSeparated = realmsAreSeparated();
+  const targetWidth = realmSeparated ? map.arena.width : clamp(
+      Math.max(config.camera.minViewWidth, horizontalTargetWidth, requiredHeight * aspect),
+      config.camera.minViewWidth,
+      map.arena.width
+    );
   const targetHeight = targetWidth / aspect;
-  const targetX = clamp((left + right - targetWidth) / 2, 0, config.arena.width - targetWidth);
-  const targetY = clamp((top + bottom - targetHeight) / 2, 0, config.arena.height - targetHeight);
+  const targetX = clampCameraPosition((left + right - targetWidth) / 2, targetWidth, map.arena.width);
+  const targetY = clampCameraPosition((top + bottom - targetHeight) / 2, targetHeight, map.arena.height);
 
   if (!camera.initialized) {
     Object.assign(camera, { x: targetX, y: targetY, width: targetWidth, height: targetHeight, zoomOutVelocity: 0, initialized: true });
@@ -78,14 +161,19 @@ function updateCamera() {
   const zoomInThreshold = clamp(
     Math.max(config.camera.minViewWidth, horizontalTargetWidth + config.camera.deadZoneX, requiredHeight * aspect),
     config.camera.minViewWidth,
-    config.arena.width
+    map.arena.width
   );
   if (targetWidth > camera.width) {
+    const acceleration = realmSeparated ? config.camera.realmZoomOutAcceleration : config.camera.zoomOutAcceleration;
+    const maxSpeed = realmSeparated ? config.camera.realmZoomOutMaxSpeed : config.camera.zoomOutMaxSpeed;
     camera.zoomOutVelocity = Math.min(
-      config.camera.zoomOutMaxSpeed,
-      camera.zoomOutVelocity + config.camera.zoomOutAcceleration * dt
+      maxSpeed,
+      camera.zoomOutVelocity + acceleration * dt
     );
     camera.width = Math.min(targetWidth, camera.width + camera.zoomOutVelocity * dt);
+    if (camera.width === targetWidth) camera.zoomOutVelocity = 0;
+  } else if (realmSeparated) {
+    camera.zoomOutVelocity = 0;
   } else {
     camera.zoomOutVelocity = Math.max(0, camera.zoomOutVelocity - config.camera.zoomOutDeceleration * dt);
     if (zoomInThreshold < camera.width) {
@@ -103,7 +191,7 @@ function updateCamera() {
   if (centerOffset > halfDeadZone) camera.x += (centerOffset - halfDeadZone) * smoothing;
   else if (centerOffset < -halfDeadZone) camera.x += (centerOffset + halfDeadZone) * smoothing;
 
-  const currentTargetY = clamp((top + bottom - camera.height) / 2, 0, config.arena.height - camera.height);
+  const currentTargetY = clampCameraPosition((top + bottom - camera.height) / 2, camera.height, map.arena.height);
   camera.y += (currentTargetY - camera.y) * smoothing;
 
   const playerSpanX = right - left;
@@ -122,8 +210,8 @@ function updateCamera() {
     camera.y = Math.min(camera.y, top - safePaddingY);
     camera.y = Math.max(camera.y, bottom + safePaddingY - camera.height);
   }
-  camera.x = clamp(camera.x, 0, config.arena.width - camera.width);
-  camera.y = clamp(camera.y, 0, config.arena.height - camera.height);
+  camera.x = clampCameraPosition(camera.x, camera.width, map.arena.width);
+  camera.y = clampCameraPosition(camera.y, camera.height, map.arena.height);
   return camera;
 }
 function render() {
@@ -131,46 +219,116 @@ function render() {
   const now = Date.now(); const remaining = state.phaseEndsAt ? state.phaseEndsAt - now : 0;
   $('#scoreboard').innerHTML = state.players.map((player) => {
     const power = player.power ? config.powers[player.power]?.name : 'Choosing...';
-    const cooldown = player.id === myId && player.power === 'dash' && player.dashCooldownMs > 0 ? ` · ${Math.ceil(player.dashCooldownMs / 100) / 10}s` : '';
+    const cooldownMs = player.power === 'dash' ? player.dashCooldownMs :
+      player.power === 'snowball' ? player.snowballCooldownMs :
+        player.power === 'realm-shift' ? player.realmCooldownMs : 0;
+    const cooldown = player.id === myId && cooldownMs > 0 ? ` · ${Math.ceil(cooldownMs / 100) / 10}s` : '';
     return `<div class="score"><span>${escapeHtml(player.name)}${player.id === myId ? ' · YOU' : ''}</span><b>${player.score}</b><em>${escapeHtml(power)}${cooldown}</em></div>`;
   }).join('');
+  const me = state.players.find((player) => player.id === myId);
+  canvas.style.cursor = state.phase === 'playing' && me?.power === 'snowball' ? 'crosshair' : 'default';
   const view = updateCamera();
-  drawArena(view); drawPlayers(view); drawTimer(remaining); drawOverlay(remaining);
+  drawArena(view); drawProjectiles(view); drawPlayers(view); drawTimer(remaining); drawOverlay(remaining);
 }
 function applyCamera(view) {
   ctx.scale(canvas.width / view.width, canvas.height / view.height);
   ctx.translate(-view.x, -view.y);
 }
 function drawArena(view) {
+  const map = activeMap();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height); sky.addColorStop(0, '#17283d'); sky.addColorStop(1, '#0a0d12');
+  const inRealm = state.players.find((player) => player.id === myId)?.inRealm;
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, inRealm ? '#482061' : map.theme.skyTop);
+  sky.addColorStop(1, inRealm ? '#170b24' : map.theme.skyBottom);
   ctx.fillStyle = sky; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.save(); applyCamera(view);
-  ctx.fillStyle = 'rgba(103,232,249,.08)';
-  for (let x = 35; x < config.arena.width; x += 125) ctx.fillRect(x, 70 + (Math.floor(x / 125) % 6) * 150, 76, 2);
-  config.platforms.forEach((platform) => {
+  ctx.fillStyle = inRealm ? 'rgba(232,121,249,.11)' : 'rgba(103,232,249,.08)';
+  for (let x = 35; x < map.arena.width; x += 125) ctx.fillRect(x, 70 + (Math.floor(x / 125) % 6) * 150, 76, 2);
+  map.platforms.forEach((platform) => {
     ctx.fillStyle = '#343d4c'; ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-    ctx.fillStyle = '#67e8f9'; ctx.fillRect(platform.x, platform.y, platform.width, 4);
+    ctx.fillStyle = inRealm ? '#e879f9' : map.theme.accent; ctx.fillRect(platform.x, platform.y, platform.width, 4);
+  });
+  map.jumpPads.forEach((pad) => {
+    ctx.fillStyle = '#a3e635'; ctx.fillRect(pad.x, pad.y, pad.width, pad.height);
+    ctx.fillStyle = '#ecfccb';
+    const arrowX = pad.x + pad.width / 2;
+    ctx.beginPath();
+    ctx.moveTo(arrowX, pad.y - 12);
+    ctx.lineTo(arrowX - 9, pad.y - 2);
+    ctx.lineTo(arrowX + 9, pad.y - 2);
+    ctx.closePath();
+    ctx.fill();
   });
   ctx.restore();
 }
 function drawPlayers(view) {
   const scale = canvas.width / view.width;
+  const players = visiblePlayers();
   ctx.save(); applyCamera(view);
-  state.players.forEach((player) => {
+  players.forEach((player) => {
     ctx.fillStyle = player.role === 'chaser' ? '#fb7185' : '#67e8f9';
     ctx.fillRect(player.position.x, player.position.y, config.player.width, config.player.height);
   });
   ctx.restore();
-  state.players.forEach((player) => {
+  players.forEach((player) => {
     const isChaser = player.role === 'chaser';
     const centerX = (player.position.x + config.player.width / 2 - view.x) * scale;
     const topY = (player.position.y - view.y) * scale;
     const bottomY = (player.position.y + config.player.height - view.y) * scale;
+    drawPowerMeter(player, centerX, topY - 25);
     ctx.fillStyle = '#e9edf6'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
     ctx.fillText(`${player.name}${player.id === myId ? ' (YOU)' : ''}`, centerX, topY - 8);
     ctx.fillStyle = isChaser ? '#fb7185' : '#67e8f9'; ctx.font = 'bold 11px system-ui'; ctx.fillText(isChaser ? 'TAGGER' : 'RUNNER', centerX, bottomY + 14);
+    if (player.stunnedMs > 0) {
+      const stunRatio = clamp(player.stunnedMs / config.powers.snowball.stunMs, 0, 1);
+      const indicatorY = topY - 43;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(248, 250, 252, .25)';
+      ctx.beginPath(); ctx.arc(centerX, indicatorY, 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(centerX, indicatorY, 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * stunRatio);
+      ctx.stroke();
+    }
   });
+}
+function drawPowerMeter(player, centerX, centerY) {
+  const power = config.powers[player.power];
+  if (!power) return;
+  let readyRatio = 1;
+  if (player.power === 'dash') {
+    readyRatio = 1 - player.dashCooldownMs / power.cooldownMs;
+  } else if (player.power === 'snowball') {
+    readyRatio = 1 - player.snowballCooldownMs / power.cooldownMs;
+  } else if (player.power === 'double-jump') {
+    readyRatio = player.grounded || player.extraJumpsRemaining > 0 ? 1 : 0;
+  } else if (player.power === 'realm-shift') {
+    readyRatio = 1 - player.realmCooldownMs / power.cooldownMs;
+  }
+
+  const width = 42;
+  const height = 5;
+  const x = centerX - width / 2;
+  const y = centerY - height / 2;
+  ctx.fillStyle = 'rgba(10, 13, 18, .8)';
+  ctx.fillRect(x - 1, y - 1, width + 2, height + 2);
+  ctx.fillStyle = power.meterColor;
+  ctx.fillRect(x, y, width * clamp(readyRatio, 0, 1), height);
+}
+function drawProjectiles(view) {
+  ctx.save(); applyCamera(view);
+  ctx.fillStyle = '#f8fafc';
+  ctx.strokeStyle = '#bae6fd';
+  ctx.lineWidth = 3;
+  const inRealm = state.players.find((player) => player.id === myId)?.inRealm || false;
+  (state.projectiles || []).filter((projectile) => projectile.inRealm === inRealm).forEach((projectile) => {
+    ctx.beginPath();
+    ctx.arc(projectile.position.x, projectile.position.y, config.powers.snowball.projectileRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+  ctx.restore();
 }
 function drawTimer(remaining) {
   if (state.phase !== 'playing') return;
@@ -194,6 +352,14 @@ function setOverlay(view, html) {
   return true;
 }
 function drawOverlay(remaining) {
+  if (state.phase === 'playing' && hasIncomingRestartRequest()) {
+    drawRestartRequest();
+    return;
+  }
+  if (state.phase === 'playing' && exitMenuOpen) {
+    drawExitMenu();
+    return;
+  }
   if (state.phase === 'power-select') {
     drawPowerSelection();
     return;
@@ -225,6 +391,33 @@ function drawOverlay(remaining) {
   setOverlay('playing', '');
 }
 
+function drawExitMenu() {
+  const restartRequested = state.restartRequestPlayerId === myId;
+  const changed = setOverlay(
+    `exit-menu:${restartRequested}`,
+    `<div class="exit-menu"><p class="eyebrow">Match controls</p><h2>Game menu</h2><div class="menu-actions"><button id="resume" class="primary">Resume</button><button id="restart-round"${restartRequested ? ' disabled' : ''}>${restartRequested ? 'Restart requested' : 'Ask to restart round'}</button><button id="quit-match" class="danger">Quit</button></div></div>`
+  );
+  if (!changed) return;
+  $('#resume').onclick = closeExitMenu;
+  $('#restart-round').onclick = () => {
+    socket.emit('round:restart:request');
+    $('#restart-round').disabled = true;
+    $('#restart-round').textContent = 'Restart requested';
+  };
+  $('#quit-match').onclick = () => leaveLobby(false);
+}
+
+function drawRestartRequest() {
+  const requester = state.players.find((player) => player.id === state.restartRequestPlayerId);
+  const changed = setOverlay(
+    `restart-request:${state.restartRequestPlayerId}`,
+    `<div class="exit-menu"><p class="eyebrow">Restart request</p><h2>Restart this round?</h2><p>${escapeHtml(requester?.name || 'Your opponent')} wants to restart the current round.</p><div class="menu-actions"><button id="accept-restart" class="primary">Accept</button><button id="decline-restart">Decline</button></div></div>`
+  );
+  if (!changed) return;
+  $('#accept-restart').onclick = () => socket.emit('round:restart:respond', { accepted: true });
+  $('#decline-restart').onclick = () => socket.emit('round:restart:respond', { accepted: false });
+}
+
 function drawPowerSelection() {
   const me = state.players.find((player) => player.id === myId);
   const runner = state.players.find((player) => player.role === 'runner');
@@ -248,6 +441,7 @@ function drawPowerSelection() {
     body = '<p>The tagger will see the runner’s power before choosing.</p>';
   }
 
+  body = `<p class="eyebrow">Map: ${escapeHtml(activeMap().name)}</p>${body}`;
   const view = `power-select:${state.selectionPlayerId}:${state.players.map((player) => player.power || '-').join(':')}`;
   const changed = setOverlay(view, `<div class="power-select"><p class="eyebrow">Round ${state.round} · ${me.role}</p><h2>${heading}</h2>${body}</div>`);
   if (changed && isMyTurn) {

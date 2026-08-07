@@ -1,0 +1,163 @@
+{
+  "defaultMapId": "spire",
+  "camera": {
+    "minViewWidth": 700,
+    "paddingX": 220,
+    "paddingY": 130,
+    "deadZoneX": 135,
+    "zoomInSmoothing": 0.12,
+    "zoomOutAcceleration": 2600,
+    "zoomOutDeceleration": 900,
+    "zoomOutMaxSpeed": 1000,
+    "realmZoomOutAcceleration": 5200,
+    "realmZoomOutMaxSpeed": 1800
+  },
+  "player": {
+    "width": 20,
+    "height": 20,
+    "speed": 275,
+    "jumpSpeed": 733.2,
+    "gravity": 1450,
+    "maxFallSpeed": 760,
+    "coyoteTimeMs": 100
+  },
+  "round": {
+    "durationMs": 60000,
+    "countdownMs": 3000,
+    "resultMs": 3000,
+    "winsToMatch": 3
+  },
+  "powers": {
+    "dash": {
+      "name": "Dash",
+      "description": "Burst horizontally with Shift. Recharges after a short cooldown.",
+      "meterColor": "#fb923c",
+      "speed": 720,
+      "durationMs": 180,
+      "cooldownMs": 1250
+    },
+    "double-jump": {
+      "name": "Double Jump",
+      "description": "Jump once more while airborne. The extra jump refreshes when you land.",
+      "meterColor": "#c084fc"
+    },
+    "snowball": {
+      "name": "Snowball Gun",
+      "description": "Aim with the mouse and click to stun your opponent. Recharges in 7 seconds.",
+      "meterColor": "#7dd3fc",
+      "projectileSpeed": 900,
+      "projectileRadius": 9,
+      "projectileLifetimeMs": 2500,
+      "cooldownMs": 7000,
+      "stunMs": 1500
+    },
+    "realm-shift": {
+      "name": "Realm Shift",
+      "description": "Press E to enter a separate realm for 2 seconds. Recharges in 15 seconds.",
+      "meterColor": "#e879f9",
+      "durationMs": 2000,
+      "cooldownMs": 15000
+    }
+  },
+  "tickRate": 60,
+  "jumpPadSettings": {
+    "retriggerLockMs": 100
+  },
+  "maps": {
+    "spire": {
+      "name": "Neon Spire",
+      "description": "A tall mirrored parkour route with risky central shortcuts.",
+      "arena": { "width": 2250, "height": 1280 },
+      "theme": { "skyTop": "#17283d", "skyBottom": "#0a0d12", "accent": "#67e8f9" },
+      "platforms": [
+        { "x": 0, "y": 1240, "width": 2250, "height": 40 },
+        { "x": 100, "y": 1080, "width": 300, "height": 24 },
+        { "x": 500, "y": 920, "width": 280, "height": 24 },
+        { "x": 100, "y": 760, "width": 300, "height": 24 },
+        { "x": 500, "y": 600, "width": 280, "height": 24 },
+        { "x": 100, "y": 440, "width": 300, "height": 24 },
+        { "x": 500, "y": 280, "width": 280, "height": 24 },
+        { "x": 100, "y": 120, "width": 300, "height": 24 },
+        { "x": 1850, "y": 1080, "width": 300, "height": 24 },
+        { "x": 1470, "y": 920, "width": 280, "height": 24 },
+        { "x": 1850, "y": 760, "width": 300, "height": 24 },
+        { "x": 1470, "y": 600, "width": 280, "height": 24 },
+        { "x": 1850, "y": 440, "width": 300, "height": 24 },
+        { "x": 1470, "y": 280, "width": 280, "height": 24 },
+        { "x": 1850, "y": 120, "width": 300, "height": 24 },
+        { "x": 850, "y": 1070, "width": 300, "height": 24 },
+        { "x": 1190, "y": 790, "width": 300, "height": 24 },
+        { "x": 790, "y": 530, "width": 300, "height": 24 },
+        { "x": 1190, "y": 270, "width": 300, "height": 24 },
+        { "x": 850, "y": 90, "width": 300, "height": 24 },
+        { "x": 680, "y": 760, "width": 250, "height": 24 },
+        { "x": 1320, "y": 760, "width": 250, "height": 24 },
+        { "x": 680, "y": 440, "width": 250, "height": 24 },
+        { "x": 1320, "y": 440, "width": 250, "height": 24 }
+      ],
+      "jumpPads": [
+        { "x": 790, "y": 1230, "width": 50, "height": 10, "launchSpeed": 1000 },
+        { "x": 1410, "y": 1230, "width": 50, "height": 10, "launchSpeed": 1000 },
+        { "x": 1090, "y": 1060, "width": 60, "height": 10, "launchSpeed": 950 },
+        { "x": 1190, "y": 780, "width": 60, "height": 10, "launchSpeed": 950 },
+        { "x": 1030, "y": 520, "width": 60, "height": 10, "launchSpeed": 950 },
+        { "x": 1190, "y": 260, "width": 60, "height": 10, "launchSpeed": 950 }
+      ],
+      "spawns": [{ "x": 160, "y": 1220 }, { "x": 2070, "y": 1220 }]
+    },
+    "crossroads": {
+      "name": "Crossroads",
+      "description": "A compact arena with fast loops and a contested center.",
+      "arena": { "width": 1680, "height": 920 },
+      "theme": { "skyTop": "#30203d", "skyBottom": "#100c18", "accent": "#f0abfc" },
+      "platforms": [
+        { "x": 0, "y": 880, "width": 1680, "height": 40 },
+        { "x": 90, "y": 700, "width": 320, "height": 24 },
+        { "x": 510, "y": 570, "width": 260, "height": 24 },
+        { "x": 910, "y": 570, "width": 260, "height": 24 },
+        { "x": 1270, "y": 700, "width": 320, "height": 24 },
+        { "x": 170, "y": 400, "width": 300, "height": 24 },
+        { "x": 690, "y": 350, "width": 300, "height": 24 },
+        { "x": 1210, "y": 400, "width": 300, "height": 24 },
+        { "x": 450, "y": 170, "width": 260, "height": 24 },
+        { "x": 970, "y": 170, "width": 260, "height": 24 }
+      ],
+      "jumpPads": [
+        { "x": 300, "y": 870, "width": 55, "height": 10, "launchSpeed": 900 },
+        { "x": 1325, "y": 870, "width": 55, "height": 10, "launchSpeed": 900 },
+        { "x": 805, "y": 870, "width": 70, "height": 10, "launchSpeed": 1000 },
+        { "x": 805, "y": 340, "width": 70, "height": 10, "launchSpeed": 900 }
+      ],
+      "spawns": [{ "x": 130, "y": 860 }, { "x": 1530, "y": 860 }]
+    },
+    "overpass": {
+      "name": "Overpass",
+      "description": "A wide arena built around momentum, bridges, and launch-pad rotations.",
+      "arena": { "width": 2880, "height": 1040 },
+      "theme": { "skyTop": "#26351d", "skyBottom": "#0c1209", "accent": "#bef264" },
+      "platforms": [
+        { "x": 0, "y": 1000, "width": 2880, "height": 40 },
+        { "x": 120, "y": 820, "width": 420, "height": 24 },
+        { "x": 680, "y": 720, "width": 360, "height": 24 },
+        { "x": 1260, "y": 790, "width": 360, "height": 24 },
+        { "x": 1840, "y": 720, "width": 360, "height": 24 },
+        { "x": 2340, "y": 820, "width": 420, "height": 24 },
+        { "x": 360, "y": 500, "width": 360, "height": 24 },
+        { "x": 920, "y": 420, "width": 400, "height": 24 },
+        { "x": 1560, "y": 420, "width": 400, "height": 24 },
+        { "x": 2160, "y": 500, "width": 360, "height": 24 },
+        { "x": 700, "y": 190, "width": 420, "height": 24 },
+        { "x": 1380, "y": 150, "width": 420, "height": 24 },
+        { "x": 2060, "y": 190, "width": 420, "height": 24 }
+      ],
+      "jumpPads": [
+        { "x": 560, "y": 990, "width": 60, "height": 10, "launchSpeed": 930 },
+        { "x": 1420, "y": 990, "width": 60, "height": 10, "launchSpeed": 1000 },
+        { "x": 2260, "y": 990, "width": 60, "height": 10, "launchSpeed": 930 },
+        { "x": 1070, "y": 410, "width": 60, "height": 10, "launchSpeed": 900 },
+        { "x": 1750, "y": 410, "width": 60, "height": 10, "launchSpeed": 900 }
+      ],
+      "spawns": [{ "x": 180, "y": 980 }, { "x": 2680, "y": 980 }]
+    }
+  }
+}

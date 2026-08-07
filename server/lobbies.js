@@ -10,8 +10,8 @@ function code() {
   return value;
 }
 
-function createLobby(player) {
-  const lobby = { code: code(), players: [player], match: null };
+function createLobby(player, mapId) {
+  const lobby = { code: code(), players: [player], mapId, match: null };
   lobbies.set(lobby.code, lobby);
   return lobby;
 }
@@ -22,7 +22,7 @@ function joinLobby(lobbyCode, player) {
   if (lobby.players.length >= 2) return { error: 'Lobby is full.' };
   if (lobby.players.some((existing) => existing.name.toLowerCase() === player.name.toLowerCase())) return { error: 'Choose a different display name.' };
   lobby.players.push(player);
-  lobby.match = createMatch(lobby.players);
+  lobby.match = createMatch(lobby.players, lobby.mapId);
   return { lobby };
 }
 

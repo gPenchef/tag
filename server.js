@@ -4,7 +4,15 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const CONFIG = require('./shared/game-config');
 const { lobbies, createLobby, joinLobby, removePlayer } = require('./server/lobbies');
-const { createMatch, selectPower, tickMatch, publicMatch } = require('./server/game');
+const {
+  createMatch,
+  selectPower,
+  fireSnowball,
+  requestRoundRestart,
+  respondToRoundRestart,
+  tickMatch,
+  publicMatch
+} = require('./server/game');
 
 const app = express();
 const httpServer = createServer(app);
@@ -13,8 +21,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/game-config.js', (_req, res) => res.type('application/javascript').send(`window.GAME_CONFIG=${JSON.stringify(CONFIG)};`));
 
 function validName(value) { return typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 18; }
+function validMapId(value) { return typeof value === 'string' && Object.prototype.hasOwnProperty.call(CONFIG.maps, value); }
 function emitLobby(lobby) {
-  io.to(lobby.code).emit('lobby:state', { code: lobby.code, players: lobby.players.map(({ id, name }) => ({ id, name })), hasMatch: Boolean(lobby.match) });
+  io.to(lobby.code).emit('lobby:state', {
+    code: lobby.code,
+    mapId: lobby.mapId,
+    players: lobby.players.map(({ id, name }) => ({ id, name })),
+    hasMatch: Boolean(lobby.match)
+  });
 }
 function emitMatch(lobby) {
   if (lobby.match) io.to(lobby.code).emit('game:state', publicMatch(lobby.match));
@@ -43,10 +57,11 @@ function exitCurrentLobby(socket, disconnected = false) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('lobby:create', ({ name } = {}) => {
+  socket.on('lobby:create', ({ name, mapId } = {}) => {
     if (!validName(name)) return socket.emit('lobby:error', 'Enter a name from 1 to 18 characters.');
+    if (!validMapId(mapId)) return socket.emit('lobby:error', 'Choose a valid map.');
     exitCurrentLobby(socket);
-    const lobby = createLobby({ id: socket.id, name: name.trim() });
+    const lobby = createLobby({ id: socket.id, name: name.trim() }, mapId);
     socket.join(lobby.code); socket.data.lobbyCode = lobby.code;
     emitLobby(lobby);
   });
@@ -64,7 +79,14 @@ io.on('connection', (socket) => {
     const lobby = lobbies.get(socket.data.lobbyCode);
     const player = lobby?.match?.players.find((candidate) => candidate.id === socket.id);
     if (!player) return;
-    player.input = { up: Boolean(input.up), down: Boolean(input.down), left: Boolean(input.left), right: Boolean(input.right), dash: Boolean(input.dash) };
+    player.input = {
+      up: Boolean(input.up),
+      down: Boolean(input.down),
+      left: Boolean(input.left),
+      right: Boolean(input.right),
+      dash: Boolean(input.dash),
+      realm: Boolean(input.realm)
+    };
   });
   socket.on('power:select', ({ powerId } = {}) => {
     const lobby = lobbies.get(socket.data.lobbyCode);
@@ -72,12 +94,30 @@ io.on('connection', (socket) => {
     if (!match || !selectPower(match, socket.id, powerId)) return;
     emitMatch(lobby);
   });
+  socket.on('power:use', ({ target } = {}) => {
+    const lobby = lobbies.get(socket.data.lobbyCode);
+    const match = lobby?.match;
+    if (!match || !fireSnowball(match, socket.id, target)) return;
+    emitMatch(lobby);
+  });
+  socket.on('round:restart:request', () => {
+    const lobby = lobbies.get(socket.data.lobbyCode);
+    const match = lobby?.match;
+    if (!match || !requestRoundRestart(match, socket.id)) return;
+    emitMatch(lobby);
+  });
+  socket.on('round:restart:respond', ({ accepted } = {}) => {
+    const lobby = lobbies.get(socket.data.lobbyCode);
+    const match = lobby?.match;
+    if (!match || !respondToRoundRestart(match, socket.id, accepted)) return;
+    emitMatch(lobby);
+  });
   socket.on('match:rematch', () => {
     const lobby = lobbies.get(socket.data.lobbyCode);
     const match = lobby?.match;
     if (!match || match.phase !== 'match-over') return;
     match.rematchVotes.add(socket.id);
-    if (match.rematchVotes.size === 2) lobby.match = createMatch(lobby.players);
+    if (match.rematchVotes.size === 2) lobby.match = createMatch(lobby.players, lobby.mapId);
     emitMatch(lobby);
   });
   socket.on('disconnect', () => exitCurrentLobby(socket, true));
