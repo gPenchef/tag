@@ -111,7 +111,7 @@ socket.on('game:state', (nextState) => {
   state = nextState;
   if (state.phase !== 'playing') exitMenuOpen = false;
   show('game');
-  render();
+  renderHud();
 });
 
 function escapeHtml(text) { const node = document.createElement('span'); node.textContent = text; return node.innerHTML; }
@@ -135,7 +135,9 @@ addEventListener('blur', clearInput);
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || state?.phase !== 'playing') return;
   const me = state.players.find((player) => player.id === myId);
-  if (me?.power !== 'snowball' || me.snowballCooldownMs > 0 || me.stunnedMs > 0) return;
+  const gunCooldownMs = me?.power === 'snowball' ? me.snowballCooldownMs :
+    me?.power === 'wall-gun' ? me.wallGunCooldownMs : null;
+  if (gunCooldownMs === null || gunCooldownMs > 0 || me.stunnedMs > 0) return;
   const bounds = canvas.getBoundingClientRect();
   const canvasX = (event.clientX - bounds.left) * canvas.width / bounds.width;
   const canvasY = (event.clientY - bounds.top) * canvas.height / bounds.height;
@@ -192,18 +194,20 @@ function updateCamera() {
 
   const smoothing = 1 - Math.pow(1 - config.camera.zoomInSmoothing, dt * 60);
   const previousCenterX = camera.x + camera.width / 2;
+  const previousCenterY = camera.y + camera.height / 2;
   const zoomInThreshold = clamp(
-    Math.max(config.camera.minViewWidth, horizontalTargetWidth + config.camera.deadZoneX, requiredHeight * aspect),
+    Math.max(
+      config.camera.minViewWidth,
+      horizontalTargetWidth + config.camera.deadZoneX,
+      (requiredHeight + config.camera.deadZoneY) * aspect
+    ),
     config.camera.minViewWidth,
     map.arena.width
   );
   if (targetWidth > camera.width) {
     const acceleration = realmSeparated ? config.camera.realmZoomOutAcceleration : config.camera.zoomOutAcceleration;
     const maxSpeed = realmSeparated ? config.camera.realmZoomOutMaxSpeed : config.camera.zoomOutMaxSpeed;
-    camera.zoomOutVelocity = Math.min(
-      maxSpeed,
-      camera.zoomOutVelocity + acceleration * dt
-    );
+    camera.zoomOutVelocity = Math.min(maxSpeed, camera.zoomOutVelocity + acceleration * dt);
     camera.width = Math.min(targetWidth, camera.width + camera.zoomOutVelocity * dt);
     if (camera.width === targetWidth) camera.zoomOutVelocity = 0;
   } else if (realmSeparated) {
@@ -217,6 +221,7 @@ function updateCamera() {
   }
   camera.height = camera.width / aspect;
   camera.x = previousCenterX - camera.width / 2;
+  camera.y = previousCenterY - camera.height / 2;
 
   const targetCenterX = (left + right) / 2;
   const currentCenterX = camera.x + camera.width / 2;
@@ -225,8 +230,12 @@ function updateCamera() {
   if (centerOffset > halfDeadZone) camera.x += (centerOffset - halfDeadZone) * smoothing;
   else if (centerOffset < -halfDeadZone) camera.x += (centerOffset + halfDeadZone) * smoothing;
 
-  const currentTargetY = clampCameraPosition((top + bottom - camera.height) / 2, camera.height, map.arena.height);
-  camera.y += (currentTargetY - camera.y) * smoothing;
+  const targetCenterY = (top + bottom) / 2;
+  const currentCenterY = camera.y + camera.height / 2;
+  const halfDeadZoneY = config.camera.deadZoneY / 2;
+  const centerOffsetY = targetCenterY - currentCenterY;
+  if (centerOffsetY > halfDeadZoneY) camera.y += (centerOffsetY - halfDeadZoneY) * smoothing;
+  else if (centerOffsetY < -halfDeadZoneY) camera.y += (centerOffsetY + halfDeadZoneY) * smoothing;
 
   const playerSpanX = right - left;
   const playerSpanY = bottom - top;
@@ -240,31 +249,46 @@ function updateCamera() {
   if (camera.height < playerSpanY) {
     camera.y = (top + bottom - camera.height) / 2;
   } else {
-    const safePaddingY = Math.min(config.camera.paddingY, (camera.height - playerSpanY) / 2);
-    camera.y = Math.min(camera.y, top - safePaddingY);
-    camera.y = Math.max(camera.y, bottom + safePaddingY - camera.height);
+    const availablePaddingY = (camera.height - playerSpanY) / 2;
+    const safeTopPadding = Math.min(config.camera.paddingY, availablePaddingY);
+    const safeBottomPadding = Math.min(config.camera.paddingY, availablePaddingY);
+    camera.y = Math.min(camera.y, top - safeTopPadding);
+    camera.y = Math.max(camera.y, bottom + safeBottomPadding - camera.height);
   }
   camera.x = clampCameraPosition(camera.x, camera.width, map.arena.width);
   camera.y = clampCameraPosition(camera.y, camera.height, map.arena.height);
   return camera;
 }
-function render() {
+function renderHud() {
   if (!state) return;
-  const now = Date.now(); const remaining = state.phaseEndsAt ? state.phaseEndsAt - now : 0;
   $('#scoreboard').innerHTML = state.players.map((player) => {
     const power = player.power ? config.powers[player.power]?.name : 'Choosing...';
     const cooldownMs = player.power === 'dash' ? player.dashCooldownMs :
       player.power === 'snowball' ? player.snowballCooldownMs :
+        player.power === 'wall-gun' ? player.wallGunCooldownMs :
         player.power === 'realm-shift' ? player.realmCooldownMs : 0;
     const cooldown = player.id === myId && cooldownMs > 0 ? ` · ${Math.ceil(cooldownMs / 100) / 10}s` : '';
     return `<div class="score"><span>${escapeHtml(player.name)}${player.id === myId ? ' · YOU' : ''}</span><b>${player.score}</b><em>${escapeHtml(power)}${cooldown}</em></div>`;
   }).join('');
   $('#spectator-badge').classList.toggle('hidden', !spectating);
   const me = myPlayer();
-  canvas.style.cursor = state.phase === 'playing' && me?.power === 'snowball' ? 'crosshair' : 'default';
+  canvas.style.cursor = state.phase === 'playing' && ['snowball', 'wall-gun'].includes(me?.power) ? 'crosshair' : 'default';
+}
+function drawGameFrame() {
+  if (!state) return;
+  const now = Date.now(); const remaining = state.phaseEndsAt ? state.phaseEndsAt - now : 0;
   const view = updateCamera();
   drawArena(view); drawProjectiles(view); drawPlayers(view); drawTimer(remaining); drawOverlay(remaining);
 }
+function render() {
+  renderHud();
+  drawGameFrame();
+}
+function animationLoop() {
+  if (state && !screens.game.classList.contains('hidden')) drawGameFrame();
+  requestAnimationFrame(animationLoop);
+}
+requestAnimationFrame(animationLoop);
 function applyCamera(view) {
   ctx.scale(canvas.width / view.width, canvas.height / view.height);
   ctx.translate(-view.x, -view.y);
@@ -283,6 +307,13 @@ function drawArena(view) {
   map.platforms.forEach((platform) => {
     ctx.fillStyle = '#343d4c'; ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
     ctx.fillStyle = inRealm ? '#e879f9' : map.theme.accent; ctx.fillRect(platform.x, platform.y, platform.width, 4);
+  });
+  (state.walls || []).forEach((wall) => {
+    ctx.fillStyle = '#d97706';
+    ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
+    ctx.strokeStyle = '#fde68a';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(wall.x + 1.5, wall.y + 1.5, wall.width - 3, wall.height - 3);
   });
   map.jumpPads.forEach((pad) => {
     ctx.fillStyle = '#a3e635'; ctx.fillRect(pad.x, pad.y, pad.width, pad.height);
@@ -341,6 +372,8 @@ function drawPowerMeter(player, centerX, centerY) {
     readyRatio = 1 - player.dashCooldownMs / power.cooldownMs;
   } else if (player.power === 'snowball') {
     readyRatio = 1 - player.snowballCooldownMs / power.cooldownMs;
+  } else if (player.power === 'wall-gun') {
+    readyRatio = 1 - player.wallGunCooldownMs / power.cooldownMs;
   } else if (player.power === 'double-jump') {
     readyRatio = player.grounded || player.extraJumpsRemaining > 0 ? 1 : 0;
   } else if (player.power === 'realm-shift') {
@@ -361,10 +394,12 @@ function drawProjectiles(view) {
   ctx.lineWidth = 3;
   const inRealm = myPlayer()?.inRealm || false;
   (state.projectiles || []).filter((projectile) => spectating || projectile.inRealm === inRealm).forEach((projectile) => {
-    ctx.fillStyle = projectile.inRealm ? '#f0abfc' : '#f8fafc';
-    ctx.strokeStyle = projectile.inRealm ? '#d946ef' : '#bae6fd';
+    const wallShot = projectile.type === 'wall-gun';
+    const power = config.powers[projectile.type] || config.powers.snowball;
+    ctx.fillStyle = wallShot ? '#fbbf24' : projectile.inRealm ? '#f0abfc' : '#f8fafc';
+    ctx.strokeStyle = wallShot ? '#fef3c7' : projectile.inRealm ? '#d946ef' : '#bae6fd';
     ctx.beginPath();
-    ctx.arc(projectile.position.x, projectile.position.y, config.powers.snowball.projectileRadius, 0, Math.PI * 2);
+    ctx.arc(projectile.position.x, projectile.position.y, power.projectileRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   });

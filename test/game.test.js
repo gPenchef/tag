@@ -7,6 +7,7 @@ const {
   createMatch,
   selectPower,
   fireSnowball,
+  fireWallGun,
   requestRoundRestart,
   respondToRoundRestart,
   tickMatch,
@@ -69,6 +70,7 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
   assert.equal(TEST_MAP.platforms.length, 24);
   assert.equal(TEST_MAP.jumpPads.length, 6);
   assert.equal(CONFIG.camera.deadZoneX, 135);
+  assert.equal(CONFIG.camera.deadZoneY, 135);
   assert.equal(CONFIG.camera.minViewWidth, 700);
   assert.equal(CONFIG.camera.paddingX, 220);
   assert.equal(CONFIG.camera.zoomOutDeceleration, 900);
@@ -76,6 +78,10 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
   assert.equal(CONFIG.camera.realmZoomOutMaxSpeed, 1_800);
   assert.equal(CONFIG.powers.snowball.cooldownMs, 7_000);
   assert.equal(CONFIG.powers.snowball.stunMs, 1_500);
+  assert.equal(CONFIG.powers['wall-gun'].cooldownMs, 15_000);
+  assert.equal(CONFIG.powers['wall-gun'].maxWallLength, 250);
+  assert.equal(CONFIG.powers['wall-gun'].wallThickness, 20);
+  assert.equal(CONFIG.powers['wall-gun'].wallDurationMs, 3_000);
   assert.equal(CONFIG.powers.dash.meterColor, '#fb923c');
   assert.equal(CONFIG.powers['double-jump'].meterColor, '#c084fc');
   assert.equal(CONFIG.powers.snowball.meterColor, '#7dd3fc');
@@ -456,6 +462,172 @@ test('a snowball stuns the other player for one and a half seconds', () => {
   tickMatch(match, 0.25, now + 600);
   assert.equal(target.position.x, stunnedX);
   assert.equal(target.stunRemaining, 1.25);
+});
+
+test('the wall gun creates one maximum-length wall perpendicular to the surface it hits', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  builder.position = { x: 830, y: 800 };
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  assert.equal(builder.wallGunCooldownRemaining, 15);
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), false);
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(match.walls.length, 1);
+  assert.deepEqual(
+    { x: match.walls[0].x, y: match.walls[0].y, width: match.walls[0].width, height: match.walls[0].height },
+    { x: 830, y: 630, width: 20, height: 250 }
+  );
+  assert.equal(publicMatch(match).players.find((player) => player.id === builder.id).wallGunCooldownMs, 14_900);
+  assert.equal(publicMatch(match).walls.length, 1);
+});
+
+test('a wall gun wall stops at the nearest obstacle', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  builder.position = { x: 830, y: 800 };
+  match.walls.push({ id: 1, ownerId: 'other-builder', inRealm: false, x: 830, y: 650, width: 20, height: 20 });
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+
+  const wall = match.walls.find((candidate) => candidate.ownerId === builder.id);
+  assert.deepEqual({ x: wall.x, y: wall.y, width: wall.width, height: wall.height }, { x: 830, y: 670, width: 20, height: 210 });
+});
+
+test('a wall gun shot against a vertical surface creates a horizontal wall', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+
+  assert.equal(fireWallGun(match, builder.id, { x: 600, y: 580 }), true);
+  const projectile = match.projectiles[0];
+  projectile.position = { x: 480, y: 580 };
+  projectile.velocity = { x: 900, y: 0 };
+  tickMatch(match, 0.05, now + 50);
+
+  const wall = match.walls[0];
+  assert.deepEqual({ x: wall.x, y: wall.y, width: wall.width, height: wall.height }, { x: 260, y: 570, width: 250, height: 20 });
+});
+
+test('firing again replaces the wall gun owner’s previous wall', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  builder.position = { x: 830, y: 800 };
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+  const firstWallId = match.walls[0].id;
+  builder.wallGunCooldownRemaining = 0;
+  builder.position = { x: 1030, y: 800 };
+  assert.equal(fireWallGun(match, builder.id, { x: 1040, y: 900 }), true);
+  tickMatch(match, 0.1, now + 200);
+
+  assert.equal(match.walls.filter((wall) => wall.ownerId === builder.id).length, 1);
+  assert.notEqual(match.walls.find((wall) => wall.ownerId === builder.id).id, firstWallId);
+});
+
+test('created walls block player movement after a player leaves their spawn area', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match);
+  const player = match.players[0];
+  player.position = { x: 270, y: 860 };
+  player.input.right = true;
+  match.walls.push({ id: 1, ownerId: 'builder', inRealm: false, x: 300, y: 820, width: 20, height: 60 });
+
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(player.position.x, 280);
+});
+
+test('a newly created wall pushes an overlapping player out of its path', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  const other = match.players.find((player) => player.id !== builder.id);
+  builder.position = { x: 830, y: 800 };
+  other.position = { x: 825, y: 860 };
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(other.position.x, 810);
+  assert.equal(match.walls.length, 1);
+});
+
+test('a newly created wall pushes a player away from a gap that would trap them', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  const other = match.players.find((player) => player.id !== builder.id);
+  builder.position = { x: 830, y: 800 };
+  other.position = { x: 825, y: 860 };
+  match.walls.push({ id: 1, ownerId: 'other-builder', inRealm: false, x: 790, y: 600, width: 20, height: 280 });
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(other.position.x, 850);
+  assert.equal(match.walls.length, 2);
+});
+
+test('a wall is not created when every push direction would trap a player', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  const other = match.players.find((player) => player.id !== builder.id);
+  builder.position = { x: 830, y: 800 };
+  other.position = { x: 825, y: 860 };
+  match.walls.push(
+    { id: 1, ownerId: 'left-builder', inRealm: false, x: 790, y: 600, width: 20, height: 280 },
+    { id: 2, ownerId: 'right-builder', inRealm: false, x: 870, y: 600, width: 20, height: 280 }
+  );
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(other.position.x, 825);
+  assert.equal(match.walls.some((wall) => wall.ownerId === builder.id), false);
+});
+
+test('constructed walls decay after their configured duration', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'dash');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  builder.position = { x: 830, y: 800 };
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+
+  assert.equal(match.walls.length, 1);
+  const duration = CONFIG.powers['wall-gun'].wallDurationMs / 1000;
+  assert.equal(publicMatch(match).walls[0].lifetimeMs, CONFIG.powers['wall-gun'].wallDurationMs);
+  tickMatch(match, duration - 0.01, now + (duration + 0.09) * 1_000);
+  assert.equal(match.walls.length, 1);
+  tickMatch(match, 0.02, now + (duration + 0.11) * 1_000);
+  assert.equal(match.walls.length, 0);
+});
+
+test('constructed walls block players in the other realm', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-gun', 'realm-shift');
+  const builder = match.players.find((player) => player.power === 'wall-gun');
+  const realmPlayer = match.players.find((player) => player.id !== builder.id);
+  builder.position = { x: 830, y: 800 };
+
+  assert.equal(fireWallGun(match, builder.id, { x: 840, y: 900 }), true);
+  tickMatch(match, 0.1, now + 100);
+  realmPlayer.realmRemaining = 1;
+  realmPlayer.position = { x: 790, y: 800 };
+  realmPlayer.input.right = true;
+  tickMatch(match, 0.1, now + 200);
+
+  assert.equal(realmPlayer.position.x, 810);
+  assert.equal(Object.hasOwn(publicMatch(match).walls[0], 'inRealm'), false);
 });
 
 test('landing on a jump pad launches the player upward', () => {

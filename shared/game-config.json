@@ -7,6 +7,7 @@
     "paddingX": 220,
     "paddingY": 130,
     "deadZoneX": 135,
+    "deadZoneY": 135,
     "zoomInSmoothing": 0.12,
     "zoomOutAcceleration": 2600,
     "zoomOutDeceleration": 900,
@@ -52,6 +53,18 @@
       "projectileLifetimeMs": 2500,
       "cooldownMs": 7000,
       "stunMs": 1500
+    },
+    "wall-gun": {
+      "name": "Wall Gun",
+      "description": "Shoot terrain to build one perpendicular wall for 3 seconds. Recharges in 15 seconds.",
+      "meterColor": "#fbbf24",
+      "projectileSpeed": 900,
+      "projectileRadius": 9,
+      "projectileLifetimeMs": 2500,
+      "cooldownMs": 15000,
+      "wallThickness": 20,
+      "maxWallLength": 250,
+      "wallDurationMs": 3000
     },
     "realm-shift": {
       "name": "Realm Shift",

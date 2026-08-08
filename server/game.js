@@ -27,6 +27,7 @@ function createMatch(players, mapId = CONFIG.defaultMapId) {
       dashCooldownRemaining: 0,
       dashDirection: 1,
       snowballCooldownRemaining: 0,
+      wallGunCooldownRemaining: 0,
       stunRemaining: 0,
       jumpPadLockRemaining: 0,
       realmHeld: false,
@@ -37,6 +38,8 @@ function createMatch(players, mapId = CONFIG.defaultMapId) {
     })),
     projectiles: [],
     nextProjectileId: 1,
+    walls: [],
+    nextWallId: 1,
     round: 1,
     phaseEndsAt: null,
     selectionPlayerId: null,
@@ -56,7 +59,7 @@ function playerRect(player, position = player.position) {
   return { x: position.x, y: position.y, width: CONFIG.player.width, height: CONFIG.player.height };
 }
 
-function segmentRectIntersection(start, end, rect, padding = 0) {
+function segmentRectHit(start, end, rect, padding = 0) {
   const minimumX = rect.x - padding;
   const maximumX = rect.x + rect.width + padding;
   const minimumY = rect.y - padding;
@@ -65,23 +68,32 @@ function segmentRectIntersection(start, end, rect, padding = 0) {
   const deltaY = end.y - start.y;
   let nearTime = 0;
   let farTime = 1;
+  let normal = { x: 0, y: 0 };
 
-  for (const [startValue, delta, minimum, maximum] of [
-    [start.x, deltaX, minimumX, maximumX],
-    [start.y, deltaY, minimumY, maximumY]
+  for (const [axis, startValue, delta, minimum, maximum] of [
+    ['x', start.x, deltaX, minimumX, maximumX],
+    ['y', start.y, deltaY, minimumY, maximumY]
   ]) {
     if (Math.abs(delta) < Number.EPSILON) {
       if (startValue < minimum || startValue > maximum) return null;
       continue;
     }
-    const firstTime = (minimum - startValue) / delta;
-    const secondTime = (maximum - startValue) / delta;
-    nearTime = Math.max(nearTime, Math.min(firstTime, secondTime));
-    farTime = Math.min(farTime, Math.max(firstTime, secondTime));
+    const minimumTime = (minimum - startValue) / delta;
+    const maximumTime = (maximum - startValue) / delta;
+    const axisNearTime = Math.min(minimumTime, maximumTime);
+    if (axisNearTime > nearTime) {
+      nearTime = axisNearTime;
+      normal = axis === 'x' ? { x: delta > 0 ? -1 : 1, y: 0 } : { x: 0, y: delta > 0 ? -1 : 1 };
+    }
+    farTime = Math.min(farTime, Math.max(minimumTime, maximumTime));
     if (nearTime > farTime) return null;
   }
 
-  return nearTime;
+  return { time: nearTime, normal };
+}
+
+function segmentRectIntersection(start, end, rect, padding = 0) {
+  return segmentRectHit(start, end, rect, padding)?.time ?? null;
 }
 
 function resolveHorizontalMovement(player, nextX, map) {
@@ -134,6 +146,7 @@ function movePlayer(player, dt, map) {
   if (direction) player.facing = direction;
   player.dashCooldownRemaining = Math.max(0, player.dashCooldownRemaining - dt);
   player.snowballCooldownRemaining = Math.max(0, player.snowballCooldownRemaining - dt);
+  player.wallGunCooldownRemaining = Math.max(0, player.wallGunCooldownRemaining - dt);
   player.realmCooldownRemaining = Math.max(0, player.realmCooldownRemaining - dt);
   player.realmRemaining = Math.max(0, player.realmRemaining - dt);
   if (!stunned && player.power === 'dash' && input.dash && !player.dashHeld && player.dashCooldownRemaining <= 0) {
@@ -235,6 +248,7 @@ function resetPlayerForRound(player, index, map) {
   player.dashCooldownRemaining = 0;
   player.dashDirection = index === 0 ? 1 : -1;
   player.snowballCooldownRemaining = 0;
+  player.wallGunCooldownRemaining = 0;
   player.stunRemaining = 0;
   player.jumpPadLockRemaining = 0;
   player.realmHeld = false;
@@ -252,6 +266,7 @@ function beginPowerSelection(match) {
   });
   match.phase = 'power-select';
   match.projectiles = [];
+  match.walls = [];
   match.phaseEndsAt = null;
   match.selectionPlayerId = match.players.find((player) => player.role === 'runner').id;
   match.result = null;
@@ -261,6 +276,7 @@ function prepareRound(match, now = Date.now()) {
   const map = getMap(match.mapId);
   match.players.forEach((player, index) => resetPlayerForRound(player, index, map));
   match.projectiles = [];
+  match.walls = [];
   match.phase = 'countdown';
   match.phaseEndsAt = now + CONFIG.round.countdownMs;
   match.selectionPlayerId = null;
@@ -282,13 +298,14 @@ function selectPower(match, playerId, powerId, now = Date.now()) {
   return true;
 }
 
-function fireSnowball(match, playerId, target) {
+function fireConfiguredProjectile(match, playerId, target, powerId, cooldownProperty) {
   if (match.phase !== 'playing' || !target || typeof target !== 'object') return false;
   if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false;
   const map = getMap(match.mapId);
   if (target.x < 0 || target.x > map.arena.width || target.y < 0 || target.y > map.arena.height) return false;
   const player = match.players.find((candidate) => candidate.id === playerId);
-  if (!player || player.power !== 'snowball' || player.snowballCooldownRemaining > 0 || player.stunRemaining > 0) return false;
+  if (!player || player.power !== powerId || player[cooldownProperty] > 0 || player.stunRemaining > 0) return false;
+  const power = CONFIG.powers[powerId];
 
   const origin = {
     x: player.position.x + CONFIG.player.width / 2,
@@ -302,16 +319,32 @@ function fireSnowball(match, playerId, target) {
   match.projectiles.push({
     id: match.nextProjectileId++,
     ownerId: player.id,
+    type: powerId,
     position: origin,
     velocity: {
-      x: deltaX / distance * CONFIG.powers.snowball.projectileSpeed,
-      y: deltaY / distance * CONFIG.powers.snowball.projectileSpeed
+      x: deltaX / distance * power.projectileSpeed,
+      y: deltaY / distance * power.projectileSpeed
     },
     inRealm: player.realmRemaining > 0,
-    lifetimeRemaining: CONFIG.powers.snowball.projectileLifetimeMs / 1000
+    lifetimeRemaining: power.projectileLifetimeMs / 1000
   });
-  player.snowballCooldownRemaining = CONFIG.powers.snowball.cooldownMs / 1000;
+  player[cooldownProperty] = power.cooldownMs / 1000;
   return true;
+}
+
+function fireSnowball(match, playerId, target) {
+  return fireConfiguredProjectile(match, playerId, target, 'snowball', 'snowballCooldownRemaining');
+}
+
+function fireWallGun(match, playerId, target) {
+  return fireConfiguredProjectile(match, playerId, target, 'wall-gun', 'wallGunCooldownRemaining');
+}
+
+function firePowerProjectile(match, playerId, target) {
+  const player = match.players.find((candidate) => candidate.id === playerId);
+  if (player?.power === 'snowball') return fireSnowball(match, playerId, target);
+  if (player?.power === 'wall-gun') return fireWallGun(match, playerId, target);
+  return false;
 }
 
 function requestRoundRestart(match, playerId) {
@@ -329,32 +362,188 @@ function respondToRoundRestart(match, playerId, accepted, now = Date.now()) {
   return true;
 }
 
+function rangesOverlap(firstStart, firstLength, secondStart, secondLength) {
+  return firstStart < secondStart + secondLength && firstStart + firstLength > secondStart;
+}
+
+function rectInsideArena(rect, arena) {
+  return rect.x >= 0 && rect.y >= 0 &&
+    rect.x + rect.width <= arena.width && rect.y + rect.height <= arena.height;
+}
+
+function findSafeWallPush(player, wall, wallAxis, map, walls) {
+  const width = CONFIG.player.width;
+  const height = CONFIG.player.height;
+  const obstacles = [...map.platforms, ...walls];
+  const directions = wallAxis === 'vertical'
+    ? [{ x: -1, y: 0 }, { x: 1, y: 0 }]
+    : [{ x: 0, y: -1 }, { x: 0, y: 1 }];
+  const candidates = directions.map((direction) => {
+    const position = {
+      x: direction.x < 0 ? wall.x - width : direction.x > 0 ? wall.x + wall.width : player.position.x,
+      y: direction.y < 0 ? wall.y - height : direction.y > 0 ? wall.y + wall.height : player.position.y
+    };
+    const escapePosition = {
+      x: position.x + direction.x * width,
+      y: position.y + direction.y * height
+    };
+    const escapeSweep = {
+      x: Math.min(position.x, escapePosition.x),
+      y: Math.min(position.y, escapePosition.y),
+      width: width + Math.abs(escapePosition.x - position.x),
+      height: height + Math.abs(escapePosition.y - position.y)
+    };
+    return {
+      direction,
+      position,
+      escapeSweep,
+      distance: Math.abs(position.x - player.position.x) + Math.abs(position.y - player.position.y)
+    };
+  }).sort((first, second) => first.distance - second.distance);
+
+  return candidates.find((candidate) =>
+    rectInsideArena(candidate.escapeSweep, map.arena) &&
+    !obstacles.some((obstacle) => rectsOverlap(candidate.escapeSweep, obstacle))
+  ) || null;
+}
+
+function pushPlayersOutOfWall(match, map, wall, wallAxis, walls) {
+  const pushes = [];
+  for (const player of match.players) {
+    if (!rectsOverlap(playerRect(player), wall)) continue;
+    const push = findSafeWallPush(player, wall, wallAxis, map, walls);
+    if (!push) return false;
+    pushes.push({ player, ...push });
+  }
+
+  pushes.forEach(({ player, position, direction }) => {
+    player.position = position;
+    if (direction.x) player.velocity.x = 0;
+    if (direction.y) {
+      player.velocity.y = 0;
+      player.grounded = direction.y < 0;
+    }
+  });
+  return true;
+}
+
+function createWallFromHit(match, map, projectile, nextPosition, hit, radius) {
+  const { normal } = hit;
+  if (!normal.x && !normal.y) return false;
+  const power = CONFIG.powers['wall-gun'];
+  const impactCenter = {
+    x: projectile.position.x + (nextPosition.x - projectile.position.x) * hit.time,
+    y: projectile.position.y + (nextPosition.y - projectile.position.y) * hit.time
+  };
+  const contact = {
+    x: impactCenter.x - normal.x * radius,
+    y: impactCenter.y - normal.y * radius
+  };
+  const otherWalls = match.walls.filter((wall) => wall.ownerId !== projectile.ownerId);
+  const obstacles = [...map.platforms, ...otherWalls].filter((obstacle) => obstacle !== hit.platform);
+  const thickness = power.wallThickness;
+  let length = power.maxWallLength;
+  let wall;
+
+  if (normal.y) {
+    const x = Math.max(0, Math.min(map.arena.width - thickness, contact.x - thickness / 2));
+    length = Math.min(length, normal.y < 0 ? contact.y : map.arena.height - contact.y);
+    obstacles.forEach((obstacle) => {
+      if (!rangesOverlap(x, thickness, obstacle.x, obstacle.width)) return;
+      if (normal.y < 0 && obstacle.y < contact.y) {
+        length = Math.min(length, Math.max(0, contact.y - obstacle.y - obstacle.height));
+      } else if (normal.y > 0 && obstacle.y + obstacle.height > contact.y) {
+        length = Math.min(length, Math.max(0, obstacle.y - contact.y));
+      }
+    });
+    wall = {
+      x,
+      y: normal.y < 0 ? contact.y - length : contact.y,
+      width: thickness,
+      height: length
+    };
+  } else {
+    const y = Math.max(0, Math.min(map.arena.height - thickness, contact.y - thickness / 2));
+    length = Math.min(length, normal.x < 0 ? contact.x : map.arena.width - contact.x);
+    obstacles.forEach((obstacle) => {
+      if (!rangesOverlap(y, thickness, obstacle.y, obstacle.height)) return;
+      if (normal.x < 0 && obstacle.x < contact.x) {
+        length = Math.min(length, Math.max(0, contact.x - obstacle.x - obstacle.width));
+      } else if (normal.x > 0 && obstacle.x + obstacle.width > contact.x) {
+        length = Math.min(length, Math.max(0, obstacle.x - contact.x));
+      }
+    });
+    wall = {
+      x: normal.x < 0 ? contact.x - length : contact.x,
+      y,
+      width: length,
+      height: thickness
+    };
+  }
+
+  if (length < 1) return false;
+  const nextWalls = match.walls.filter((existing) => existing.ownerId !== projectile.ownerId);
+  const createdWall = {
+    id: match.nextWallId,
+    ownerId: projectile.ownerId,
+    lifetimeRemaining: power.wallDurationMs / 1000,
+    ...wall
+  };
+  nextWalls.push(createdWall);
+  const wallAxis = normal.y ? 'vertical' : 'horizontal';
+  if (!pushPlayersOutOfWall(match, map, createdWall, wallAxis, nextWalls)) return false;
+  match.nextWallId += 1;
+  match.walls = nextWalls;
+  return true;
+}
+
+function arenaBoundaryPlatforms(map) {
+  return [
+    { x: -1, y: 0, width: 1, height: map.arena.height },
+    { x: map.arena.width, y: 0, width: 1, height: map.arena.height },
+    { x: 0, y: -1, width: map.arena.width, height: 1 },
+    { x: 0, y: map.arena.height, width: map.arena.width, height: 1 }
+  ];
+}
+
+function updateWalls(match, dt) {
+  match.walls = match.walls.filter((wall) => {
+    if (!Number.isFinite(wall.lifetimeRemaining)) return true;
+    wall.lifetimeRemaining -= dt;
+    return wall.lifetimeRemaining > 0;
+  });
+}
+
 function updateProjectiles(match, dt, map) {
-  const radius = CONFIG.powers.snowball.projectileRadius;
   match.projectiles = match.projectiles.filter((projectile) => {
+    const power = CONFIG.powers[projectile.type];
+    if (!power) return false;
+    const radius = power.projectileRadius;
     const nextPosition = {
       x: projectile.position.x + projectile.velocity.x * dt,
       y: projectile.position.y + projectile.velocity.y * dt
     };
-    const target = match.players.find((player) =>
+    const target = projectile.type === 'snowball' && match.players.find((player) =>
       player.id !== projectile.ownerId && (player.realmRemaining > 0) === projectile.inRealm
     );
     const targetHitTime = target
       ? segmentRectIntersection(projectile.position, nextPosition, playerRect(target), radius)
       : null;
-    let platformHitTime = null;
-    map.platforms.forEach((platform) => {
-      const hitTime = segmentRectIntersection(projectile.position, nextPosition, platform, radius);
-      if (hitTime !== null && (platformHitTime === null || hitTime < platformHitTime)) platformHitTime = hitTime;
+    let platformHit = null;
+    [...map.platforms, ...match.walls, ...arenaBoundaryPlatforms(map)].forEach((platform) => {
+      const hit = segmentRectHit(projectile.position, nextPosition, platform, radius);
+      if (hit && (!platformHit || hit.time < platformHit.time)) platformHit = { ...hit, platform };
     });
-
-    if (targetHitTime !== null && (platformHitTime === null || targetHitTime <= platformHitTime)) {
+    if (targetHitTime !== null && (!platformHit || targetHitTime <= platformHit.time)) {
       target.stunRemaining = Math.max(target.stunRemaining, CONFIG.powers.snowball.stunMs / 1000);
       target.dashRemaining = 0;
       target.velocity.x = 0;
       return false;
     }
-    if (platformHitTime !== null) return false;
+    if (platformHit) {
+      if (projectile.type === 'wall-gun') createWallFromHit(match, map, projectile, nextPosition, platformHit, radius);
+      return false;
+    }
 
     projectile.position = nextPosition;
     projectile.lifetimeRemaining -= dt;
@@ -381,7 +570,17 @@ function tickMatch(match, dt, now = Date.now()) {
   }
   if (match.phase === 'playing') {
     const map = getMap(match.mapId);
-    match.players.forEach((player) => movePlayer(player, dt, map));
+    updateWalls(match, dt);
+    match.players.forEach((player) => {
+      const collisionMap = {
+        ...map,
+        platforms: [
+          ...map.platforms,
+          ...match.walls.filter((wall) => !rectsOverlap(playerRect(player), wall))
+        ]
+      };
+      movePlayer(player, dt, collisionMap);
+    });
     updateProjectiles(match, dt, map);
     const [first, second] = match.players;
     const playersShareRealm = (first.realmRemaining > 0) === (second.realmRemaining > 0);
@@ -413,7 +612,7 @@ function publicMatch(match) {
     result: match.result,
     restartRequestPlayerId: match.restartRequestPlayerId,
     rematchVotes: [...match.rematchVotes],
-    players: match.players.map(({ id, name, score, role, power, position, grounded, extraJumpsRemaining, dashCooldownRemaining, snowballCooldownRemaining, stunRemaining, realmRemaining, realmCooldownRemaining }) => ({
+    players: match.players.map(({ id, name, score, role, power, position, grounded, extraJumpsRemaining, dashCooldownRemaining, snowballCooldownRemaining, wallGunCooldownRemaining, stunRemaining, realmRemaining, realmCooldownRemaining }) => ({
       id,
       name,
       score,
@@ -424,12 +623,22 @@ function publicMatch(match) {
       extraJumpsRemaining,
       dashCooldownMs: Math.ceil(dashCooldownRemaining * 1000),
       snowballCooldownMs: Math.ceil(snowballCooldownRemaining * 1000),
+      wallGunCooldownMs: Math.ceil(wallGunCooldownRemaining * 1000),
       stunnedMs: Math.ceil(stunRemaining * 1000),
       inRealm: realmRemaining > 0,
       realmRemainingMs: Math.ceil(realmRemaining * 1000),
       realmCooldownMs: Math.ceil(realmCooldownRemaining * 1000)
     })),
-    projectiles: match.projectiles.map(({ id, ownerId, position, inRealm }) => ({ id, ownerId, position, inRealm }))
+    projectiles: match.projectiles.map(({ id, ownerId, type, position, inRealm }) => ({ id, ownerId, type, position, inRealm })),
+    walls: match.walls.map(({ id, ownerId, lifetimeRemaining, x, y, width, height }) => ({
+      id,
+      ownerId,
+      lifetimeMs: Math.ceil(lifetimeRemaining * 1000),
+      x,
+      y,
+      width,
+      height
+    }))
   };
 }
 
@@ -437,6 +646,8 @@ module.exports = {
   createMatch,
   selectPower,
   fireSnowball,
+  fireWallGun,
+  firePowerProjectile,
   requestRoundRestart,
   respondToRoundRestart,
   tickMatch,
