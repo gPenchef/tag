@@ -28,13 +28,15 @@ function createMatch(players, mapId = CONFIG.defaultMapId) {
       dashDirection: 1,
       snowballCooldownRemaining: 0,
       wallGunCooldownRemaining: 0,
+      wallDrillCooldownRemaining: 0,
+      wallDrill: null,
       stunRemaining: 0,
       jumpPadLockRemaining: 0,
-      realmHeld: false,
+      abilityHeld: false,
       realmRemaining: 0,
       realmCooldownRemaining: 0,
       facing: index === 0 ? 1 : -1,
-      input: { up: false, down: false, left: false, right: false, dash: false, realm: false }
+      input: { up: false, down: false, left: false, right: false, dash: false, ability: false }
     })),
     projectiles: [],
     nextProjectileId: 1,
@@ -57,6 +59,295 @@ function rectsOverlap(a, b) {
 
 function playerRect(player, position = player.position) {
   return { x: position.x, y: position.y, width: CONFIG.player.width, height: CONFIG.player.height };
+}
+
+const DRILL_CONTACT_TOLERANCE = 1;
+const DRILL_GEOMETRY_TOLERANCE = 0.001;
+
+function clonePosition(position) {
+  return { x: position.x, y: position.y };
+}
+
+function validRect(rect) {
+  return rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) &&
+    rect.width > 0 && rect.height > 0;
+}
+
+function rangesContain(outerStart, outerLength, innerStart, innerLength, tolerance = 0) {
+  return innerStart >= outerStart - tolerance &&
+    innerStart + innerLength <= outerStart + outerLength + tolerance;
+}
+
+function sweptPlayerRect(first, second) {
+  return {
+    x: Math.min(first.x, second.x),
+    y: Math.min(first.y, second.y),
+    width: CONFIG.player.width + Math.abs(second.x - first.x),
+    height: CONFIG.player.height + Math.abs(second.y - first.y)
+  };
+}
+
+function sameRect(first, second) {
+  return validRect(first) && validRect(second) &&
+    Math.abs(first.x - second.x) <= DRILL_GEOMETRY_TOLERANCE &&
+    Math.abs(first.y - second.y) <= DRILL_GEOMETRY_TOLERANCE &&
+    Math.abs(first.width - second.width) <= DRILL_GEOMETRY_TOLERANCE &&
+    Math.abs(first.height - second.height) <= DRILL_GEOMETRY_TOLERANCE;
+}
+
+function positionInsideArena(position, arena) {
+  return Number.isFinite(position?.x) && Number.isFinite(position?.y) &&
+    rectInsideArena(playerRect(null, position), arena);
+}
+
+function drillTargetRect(target) {
+  return { x: target.x, y: target.y, width: target.width, height: target.height };
+}
+
+function drillTargets(match, map) {
+  return [
+    ...map.platforms.map((platform, index) => ({ ...platform, kind: 'platform', index })),
+    ...match.walls.map((wall) => ({ ...wall, kind: 'wall', id: wall.id }))
+  ].filter(validRect);
+}
+
+function resolveDrillTarget(match, map, targetReference) {
+  if (!targetReference || typeof targetReference !== 'object') return null;
+  if (targetReference.kind === 'platform' && Number.isInteger(targetReference.index)) {
+    return map.platforms[targetReference.index] || null;
+  }
+  if (targetReference.kind === 'wall' && Number.isInteger(targetReference.id)) {
+    return match.walls.find((wall) => wall.id === targetReference.id) || null;
+  }
+  return null;
+}
+
+function drillDirectionPreference(direction, input, facing) {
+  const requestedDirections = [];
+  if (input.down) requestedDirections.push({ x: 0, y: 1 });
+  if (input.up) requestedDirections.push({ x: 0, y: -1 });
+  if (input.left) requestedDirections.push({ x: -1, y: 0 });
+  if (input.right) requestedDirections.push({ x: 1, y: 0 });
+  const requestedIndex = requestedDirections.findIndex((candidate) =>
+    candidate.x === direction.x && candidate.y === direction.y
+  );
+  if (requestedIndex >= 0) return requestedIndex;
+  if (direction.x === facing) return requestedDirections.length + 1;
+  if (direction.y === 1) return requestedDirections.length + 2;
+  if (direction.y === -1) return requestedDirections.length + 3;
+  return requestedDirections.length + 4;
+}
+
+function contactDirections(player, target) {
+  const playerBox = playerRect(player);
+  if (rectsOverlap(playerBox, target)) return [];
+  const directions = [];
+  const coversPlayerVertically = rangesContain(
+    target.y,
+    target.height,
+    playerBox.y,
+    playerBox.height,
+    DRILL_CONTACT_TOLERANCE
+  );
+  const coversPlayerHorizontally = rangesContain(
+    target.x,
+    target.width,
+    playerBox.x,
+    playerBox.width,
+    DRILL_CONTACT_TOLERANCE
+  );
+
+  if (coversPlayerVertically && Math.abs(playerBox.x + playerBox.width - target.x) <= DRILL_CONTACT_TOLERANCE) {
+    directions.push({ x: 1, y: 0 });
+  }
+  if (coversPlayerVertically && Math.abs(playerBox.x - (target.x + target.width)) <= DRILL_CONTACT_TOLERANCE) {
+    directions.push({ x: -1, y: 0 });
+  }
+  if (coversPlayerHorizontally && Math.abs(playerBox.y + playerBox.height - target.y) <= DRILL_CONTACT_TOLERANCE) {
+    directions.push({ x: 0, y: 1 });
+  }
+  if (coversPlayerHorizontally && Math.abs(playerBox.y - (target.y + target.height)) <= DRILL_CONTACT_TOLERANCE) {
+    directions.push({ x: 0, y: -1 });
+  }
+  return directions;
+}
+
+function drillThickness(target, direction) {
+  return direction.x ? target.width : target.height;
+}
+
+function drillExitPosition(player, target, direction) {
+  if (direction.x > 0) return { x: target.x + target.width, y: player.position.y };
+  if (direction.x < 0) return { x: target.x - CONFIG.player.width, y: player.position.y };
+  if (direction.y > 0) return { x: player.position.x, y: target.y + target.height };
+  return { x: player.position.x, y: target.y - CONFIG.player.height };
+}
+
+function drillObstacles(match, map, targetReference) {
+  return [
+    ...map.platforms.map((platform, index) => ({ kind: 'platform', index, rect: platform })),
+    ...match.walls.map((wall) => ({ kind: 'wall', id: wall.id, rect: wall })),
+    ...map.jumpPads.map((jumpPad) => ({ kind: 'jump-pad', rect: jumpPad }))
+  ].filter((candidate) => {
+    if (candidate.kind !== targetReference.kind) return true;
+    if (candidate.kind === 'platform') return candidate.index !== targetReference.index;
+    if (candidate.kind === 'wall') return candidate.id !== targetReference.id;
+    return true;
+  }).map((candidate) => candidate.rect).filter(validRect);
+}
+
+function drillPlanIsClear(match, map, drill) {
+  if (!drill || !positionInsideArena(drill.recoilPosition, map.arena) ||
+      !positionInsideArena(drill.exitPosition, map.arena)) return false;
+  const travelSweep = sweptPlayerRect(drill.recoilPosition, drill.exitPosition);
+  if (!rectInsideArena(travelSweep, map.arena)) return false;
+  return !drillObstacles(match, map, drill.target).some((obstacle) => rectsOverlap(travelSweep, obstacle));
+}
+
+function createDrillPlan(match, map, player, target, direction) {
+  const power = CONFIG.powers['wall-drill'];
+  if (!power || ![
+    power.drillDurationMs,
+    power.recoilDurationMs,
+    power.recoilDistance,
+    power.maxThickness,
+    power.cooldownMs
+  ].every(Number.isFinite) || power.drillDurationMs <= 0 || power.recoilDurationMs < 0 ||
+      power.recoilDurationMs >= power.drillDurationMs || power.recoilDistance < 0 ||
+      power.maxThickness <= 0 || power.cooldownMs < 0) return null;
+  const thickness = drillThickness(target, direction);
+  if (!Number.isFinite(thickness) || thickness <= 0 || thickness > power.maxThickness) return null;
+  const startPosition = clonePosition(player.position);
+  const recoilPosition = {
+    x: startPosition.x - direction.x * power.recoilDistance,
+    y: startPosition.y - direction.y * power.recoilDistance
+  };
+  const targetReference = target.kind === 'platform'
+    ? { kind: 'platform', index: target.index }
+    : { kind: 'wall', id: target.id };
+  const drill = {
+    target: targetReference,
+    targetRect: drillTargetRect(target),
+    direction: { x: direction.x, y: direction.y },
+    startPosition,
+    recoilPosition,
+    exitPosition: drillExitPosition(player, target, direction),
+    elapsed: 0,
+    phase: 'recoil'
+  };
+  return drillPlanIsClear(match, map, drill) ? drill : null;
+}
+
+function positionIsClear(match, map, position) {
+  if (!positionInsideArena(position, map.arena)) return false;
+  const box = playerRect(null, position);
+  return ![...map.platforms, ...match.walls].some((obstacle) => validRect(obstacle) && rectsOverlap(box, obstacle));
+}
+
+function playerIsGroundedAt(match, map, position) {
+  const box = playerRect(null, position);
+  if (Math.abs(box.y + box.height - map.arena.height) <= DRILL_CONTACT_TOLERANCE) return true;
+  return [...map.platforms, ...match.walls].some((obstacle) =>
+    validRect(obstacle) &&
+    rangesOverlap(box.x, box.width, obstacle.x, obstacle.width) &&
+    Math.abs(box.y + box.height - obstacle.y) <= DRILL_CONTACT_TOLERANCE
+  );
+}
+
+function restorePlayerAfterDrill(match, map, player, preferredPositions) {
+  const safePosition = preferredPositions.find((position) => positionIsClear(match, map, position));
+  if (safePosition) player.position = clonePosition(safePosition);
+  player.velocity = { x: 0, y: 0 };
+  player.grounded = playerIsGroundedAt(match, map, player.position);
+  player.coyoteTimeRemaining = player.grounded ? CONFIG.player.coyoteTimeMs / 1000 : 0;
+  player.extraJumpsRemaining = player.grounded && player.power === 'double-jump' ? 1 : 0;
+  player.wallDrill = null;
+}
+
+function cancelWallDrill(match, map, player) {
+  if (!player.wallDrill) return;
+  const drill = player.wallDrill;
+  restorePlayerAfterDrill(match, map, player, [
+    drill.startPosition,
+    drill.recoilPosition,
+    player.position,
+    drill.exitPosition
+  ]);
+}
+
+function startWallDrill(match, playerId) {
+  if (match.phase !== 'playing') return false;
+  const player = match.players.find((candidate) => candidate.id === playerId);
+  if (!player || player.power !== 'wall-drill' || player.wallDrill || player.stunRemaining > 0 ||
+      !Number.isFinite(player.wallDrillCooldownRemaining) || player.wallDrillCooldownRemaining > 0 ||
+      !positionInsideArena(player.position, getMap(match.mapId).arena)) return false;
+  const map = getMap(match.mapId);
+  const candidates = drillTargets(match, map).flatMap((target) =>
+    contactDirections(player, target).map((direction) => ({
+      target,
+      direction,
+      preference: drillDirectionPreference(direction, player.input, player.facing)
+    }))
+  ).sort((first, second) => first.preference - second.preference);
+
+  for (const candidate of candidates) {
+    const drill = createDrillPlan(match, map, player, candidate.target, candidate.direction);
+    if (!drill) continue;
+    player.wallDrill = drill;
+    player.velocity = { x: 0, y: 0 };
+    player.dashRemaining = 0;
+    player.grounded = false;
+    if (candidate.direction.x) player.facing = candidate.direction.x;
+    return true;
+  }
+  return false;
+}
+
+function lerpPosition(first, second, amount) {
+  return {
+    x: first.x + (second.x - first.x) * amount,
+    y: first.y + (second.y - first.y) * amount
+  };
+}
+
+function updateWallDrill(match, map, player, dt) {
+  const drill = player.wallDrill;
+  if (!drill) return false;
+  const target = resolveDrillTarget(match, map, drill.target);
+  if (!sameRect(target, drill.targetRect) || !drillPlanIsClear(match, map, drill)) {
+    cancelWallDrill(match, map, player);
+    return true;
+  }
+
+  const power = CONFIG.powers['wall-drill'];
+  const duration = power.drillDurationMs / 1000;
+  const recoilDuration = power.recoilDurationMs / 1000;
+  if (!Number.isFinite(duration) || !Number.isFinite(recoilDuration) || duration <= 0 ||
+      recoilDuration < 0 || recoilDuration >= duration) {
+    cancelWallDrill(match, map, player);
+    return true;
+  }
+
+  const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
+  drill.elapsed = Math.min(duration, drill.elapsed + safeDt);
+  if (drill.elapsed <= recoilDuration) {
+    drill.phase = 'recoil';
+    const progress = recoilDuration > 0 ? drill.elapsed / recoilDuration : 1;
+    player.position = lerpPosition(drill.startPosition, drill.recoilPosition, progress);
+  } else {
+    drill.phase = 'slam';
+    const progress = (drill.elapsed - recoilDuration) / (duration - recoilDuration);
+    player.position = lerpPosition(drill.recoilPosition, drill.exitPosition, progress * progress);
+  }
+  player.velocity = { x: 0, y: 0 };
+  player.grounded = false;
+
+  if (drill.elapsed < duration) return true;
+  const exitPosition = clonePosition(drill.exitPosition);
+  restorePlayerAfterDrill(match, map, player, [exitPosition, drill.recoilPosition, drill.startPosition]);
+  if (player.position.x !== exitPosition.x || player.position.y !== exitPosition.y) return true;
+  player.wallDrillCooldownRemaining = power.cooldownMs / 1000;
+  return true;
 }
 
 function segmentRectHit(start, end, rect, padding = 0) {
@@ -135,7 +426,7 @@ function launchPlayerFromPad(player, jumpPad) {
   player.jumpPadLockRemaining = CONFIG.jumpPadSettings.retriggerLockMs / 1000;
 }
 
-function movePlayer(player, dt, map) {
+function movePlayer(match, player, dt, map) {
   const input = player.input;
   const stunned = player.stunRemaining > 0;
   const direction = stunned ? 0 : (input.right ? 1 : 0) - (input.left ? 1 : 0);
@@ -147,19 +438,42 @@ function movePlayer(player, dt, map) {
   player.dashCooldownRemaining = Math.max(0, player.dashCooldownRemaining - dt);
   player.snowballCooldownRemaining = Math.max(0, player.snowballCooldownRemaining - dt);
   player.wallGunCooldownRemaining = Math.max(0, player.wallGunCooldownRemaining - dt);
+  player.wallDrillCooldownRemaining = Math.max(0, player.wallDrillCooldownRemaining - dt);
   player.realmCooldownRemaining = Math.max(0, player.realmCooldownRemaining - dt);
   player.realmRemaining = Math.max(0, player.realmRemaining - dt);
+
+  if (player.wallDrill) {
+    player.abilityHeld = input.ability;
+    if (stunned) cancelWallDrill(match, map, player);
+    else updateWallDrill(match, map, player, dt);
+    return;
+  }
+  if (!stunned && player.power === 'wall-drill' && input.ability && !player.abilityHeld) {
+    startWallDrill(match, player.id);
+  }
+  if (!stunned && player.power === 'realm-shift' && input.ability && !player.abilityHeld && player.realmCooldownRemaining <= 0) {
+    player.realmRemaining = CONFIG.powers['realm-shift'].durationMs / 1000;
+    player.realmCooldownRemaining = CONFIG.powers['realm-shift'].cooldownMs / 1000;
+  }
+  player.abilityHeld = input.ability;
+  if (player.wallDrill) {
+    updateWallDrill(match, map, player, dt);
+    return;
+  }
+
+  const collisionMap = {
+    ...map,
+    platforms: [
+      ...map.platforms,
+      ...match.walls.filter((wall) => !rectsOverlap(playerRect(player), wall))
+    ]
+  };
   if (!stunned && player.power === 'dash' && input.dash && !player.dashHeld && player.dashCooldownRemaining <= 0) {
     player.dashDirection = direction || player.facing;
     player.dashRemaining = CONFIG.powers.dash.durationMs / 1000;
     player.dashCooldownRemaining = CONFIG.powers.dash.cooldownMs / 1000;
   }
   player.dashHeld = input.dash;
-  if (!stunned && player.power === 'realm-shift' && input.realm && !player.realmHeld && player.realmCooldownRemaining <= 0) {
-    player.realmRemaining = CONFIG.powers['realm-shift'].durationMs / 1000;
-    player.realmCooldownRemaining = CONFIG.powers['realm-shift'].cooldownMs / 1000;
-  }
-  player.realmHeld = input.realm;
   if (stunned) {
     player.dashRemaining = 0;
     player.velocity.x = 0;
@@ -185,7 +499,7 @@ function movePlayer(player, dt, map) {
   const previousX = player.position.x;
   const unclampedX = player.position.x + player.velocity.x * dt;
   const nextX = Math.max(0, Math.min(width - CONFIG.player.width, unclampedX));
-  player.position.x = resolveHorizontalMovement(player, nextX, map);
+  player.position.x = resolveHorizontalMovement(player, nextX, collisionMap);
   const horizontalSweepLeft = Math.min(previousX, player.position.x);
   const horizontalSweepRight = Math.max(previousX + CONFIG.player.width, player.position.x + CONFIG.player.width);
   const sideJumpPad = player.jumpPadLockRemaining <= 0 && map.jumpPads.find((pad) =>
@@ -201,7 +515,7 @@ function movePlayer(player, dt, map) {
       player.position.x + CONFIG.player.width > pad.x && player.position.x < pad.x + pad.width &&
       previousBottom <= pad.y && nextY + CONFIG.player.height >= pad.y
     );
-    const landing = map.platforms.find((platform) =>
+    const landing = collisionMap.platforms.find((platform) =>
       player.position.x + CONFIG.player.width > platform.x && player.position.x < platform.x + platform.width &&
       previousBottom <= platform.y && nextY + CONFIG.player.height >= platform.y
     );
@@ -214,7 +528,7 @@ function movePlayer(player, dt, map) {
       player.grounded = true;
     }
   } else {
-    const ceiling = map.platforms.find((platform) =>
+    const ceiling = collisionMap.platforms.find((platform) =>
       player.position.x + CONFIG.player.width > platform.x && player.position.x < platform.x + platform.width &&
       player.position.y >= platform.y + platform.height && nextY <= platform.y + platform.height
     );
@@ -249,13 +563,15 @@ function resetPlayerForRound(player, index, map) {
   player.dashDirection = index === 0 ? 1 : -1;
   player.snowballCooldownRemaining = 0;
   player.wallGunCooldownRemaining = 0;
+  player.wallDrillCooldownRemaining = 0;
+  player.wallDrill = null;
   player.stunRemaining = 0;
   player.jumpPadLockRemaining = 0;
-  player.realmHeld = false;
+  player.abilityHeld = false;
   player.realmRemaining = 0;
   player.realmCooldownRemaining = 0;
   player.facing = index === 0 ? 1 : -1;
-  player.input = { up: false, down: false, left: false, right: false, dash: false, realm: false };
+  player.input = { up: false, down: false, left: false, right: false, dash: false, ability: false };
 }
 
 function beginPowerSelection(match) {
@@ -427,6 +743,14 @@ function pushPlayersOutOfWall(match, map, wall, wallAxis, walls) {
   return true;
 }
 
+function cancelDrillsBlockedByWall(match, map, wall) {
+  match.players.forEach((player) => {
+    if (!player.wallDrill) return;
+    const drillSweep = sweptPlayerRect(player.wallDrill.recoilPosition, player.wallDrill.exitPosition);
+    if (rectsOverlap(drillSweep, wall)) cancelWallDrill(match, map, player);
+  });
+}
+
 function createWallFromHit(match, map, projectile, nextPosition, hit, radius) {
   const { normal } = hit;
   if (!normal.x && !normal.y) return false;
@@ -489,6 +813,7 @@ function createWallFromHit(match, map, projectile, nextPosition, hit, radius) {
     lifetimeRemaining: power.wallDurationMs / 1000,
     ...wall
   };
+  cancelDrillsBlockedByWall(match, map, createdWall);
   nextWalls.push(createdWall);
   const wallAxis = normal.y ? 'vertical' : 'horizontal';
   if (!pushPlayersOutOfWall(match, map, createdWall, wallAxis, nextWalls)) return false;
@@ -538,6 +863,7 @@ function updateProjectiles(match, dt, map) {
       target.stunRemaining = Math.max(target.stunRemaining, CONFIG.powers.snowball.stunMs / 1000);
       target.dashRemaining = 0;
       target.velocity.x = 0;
+      if (target.wallDrill) cancelWallDrill(match, map, target);
       return false;
     }
     if (platformHit) {
@@ -553,12 +879,24 @@ function updateProjectiles(match, dt, map) {
   });
 }
 
+function revalidateActiveWallDrills(match, map) {
+  match.players.forEach((player) => {
+    const drill = player.wallDrill;
+    if (!drill) return;
+    const target = resolveDrillTarget(match, map, drill.target);
+    if (!sameRect(target, drill.targetRect) || !drillPlanIsClear(match, map, drill)) {
+      cancelWallDrill(match, map, player);
+    }
+  });
+}
+
 function finishRound(match, winner, reason) {
   winner.score += 1;
   match.phase = 'result';
   match.phaseEndsAt = Date.now() + CONFIG.round.resultMs;
   match.result = { winnerId: winner.id, winnerName: winner.name, reason };
   match.projectiles = [];
+  match.players.forEach((player) => { player.wallDrill = null; });
   match.restartRequestPlayerId = null;
 }
 
@@ -571,17 +909,9 @@ function tickMatch(match, dt, now = Date.now()) {
   if (match.phase === 'playing') {
     const map = getMap(match.mapId);
     updateWalls(match, dt);
-    match.players.forEach((player) => {
-      const collisionMap = {
-        ...map,
-        platforms: [
-          ...map.platforms,
-          ...match.walls.filter((wall) => !rectsOverlap(playerRect(player), wall))
-        ]
-      };
-      movePlayer(player, dt, collisionMap);
-    });
+    match.players.forEach((player) => movePlayer(match, player, dt, map));
     updateProjectiles(match, dt, map);
+    revalidateActiveWallDrills(match, map);
     const [first, second] = match.players;
     const playersShareRealm = (first.realmRemaining > 0) === (second.realmRemaining > 0);
     if (playersShareRealm && rectsOverlap(playerRect(first), playerRect(second))) {
@@ -612,7 +942,7 @@ function publicMatch(match) {
     result: match.result,
     restartRequestPlayerId: match.restartRequestPlayerId,
     rematchVotes: [...match.rematchVotes],
-    players: match.players.map(({ id, name, score, role, power, position, grounded, extraJumpsRemaining, dashCooldownRemaining, snowballCooldownRemaining, wallGunCooldownRemaining, stunRemaining, realmRemaining, realmCooldownRemaining }) => ({
+    players: match.players.map(({ id, name, score, role, power, position, grounded, extraJumpsRemaining, dashCooldownRemaining, snowballCooldownRemaining, wallGunCooldownRemaining, wallDrillCooldownRemaining, wallDrill, stunRemaining, realmRemaining, realmCooldownRemaining }) => ({
       id,
       name,
       score,
@@ -624,6 +954,12 @@ function publicMatch(match) {
       dashCooldownMs: Math.ceil(dashCooldownRemaining * 1000),
       snowballCooldownMs: Math.ceil(snowballCooldownRemaining * 1000),
       wallGunCooldownMs: Math.ceil(wallGunCooldownRemaining * 1000),
+      wallDrillCooldownMs: Math.ceil(wallDrillCooldownRemaining * 1000),
+      drill: wallDrill ? {
+        phase: wallDrill.phase,
+        progress: Math.max(0, Math.min(1, wallDrill.elapsed / (CONFIG.powers['wall-drill'].drillDurationMs / 1000))),
+        direction: { ...wallDrill.direction }
+      } : null,
       stunnedMs: Math.ceil(stunRemaining * 1000),
       inRealm: realmRemaining > 0,
       realmRemainingMs: Math.ceil(realmRemaining * 1000),
@@ -648,6 +984,7 @@ module.exports = {
   fireSnowball,
   fireWallGun,
   firePowerProjectile,
+  startWallDrill,
   requestRoundRestart,
   respondToRoundRestart,
   tickMatch,

@@ -1,6 +1,6 @@
 {
   "defaultMapId": "spire",
-  "enabledMapIds": ["spire", "crossroads", "overpass"],
+  "enabledMapIds": ["spire", "crossroads", "drillworks", "overpass"],
   "maxSpectatorsPerLobby": 8,
   "camera": {
     "minViewWidth": 700,
@@ -65,6 +65,16 @@
       "wallThickness": 20,
       "maxWallLength": 250,
       "wallDurationMs": 3000
+    },
+    "wall-drill": {
+      "name": "Wall Drill",
+      "description": "Press E at a wall up to 60px thick to recoil, then slam through it. Recharges in 10 seconds.",
+      "meterColor": "#34d399",
+      "drillDurationMs": 750,
+      "recoilDurationMs": 180,
+      "recoilDistance": 24,
+      "maxThickness": 60,
+      "cooldownMs": 10000
     },
     "realm-shift": {
       "name": "Realm Shift",

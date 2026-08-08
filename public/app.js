@@ -14,7 +14,7 @@ const camera = {
   lastUpdatedAt: 0,
   initialized: false
 };
-const input = { up: false, down: false, left: false, right: false, dash: false, realm: false };
+const input = { up: false, down: false, left: false, right: false, dash: false, ability: false };
 
 function show(name) {
   Object.entries(screens).forEach(([key, screen]) => screen.classList.toggle('hidden', key !== name));
@@ -116,7 +116,7 @@ socket.on('game:state', (nextState) => {
 
 function escapeHtml(text) { const node = document.createElement('span'); node.textContent = text; return node.innerHTML; }
 function setInput(event, active) {
-  const keyMap = { Space: 'up', ArrowUp: 'up', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'dash', ShiftRight: 'dash', KeyE: 'realm' }; const key = keyMap[event.code];
+  const keyMap = { Space: 'up', ArrowUp: 'up', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', ShiftLeft: 'dash', ShiftRight: 'dash', KeyE: 'ability' }; const key = keyMap[event.code];
   if (!key || !myPlayer() || screens.game.classList.contains('hidden') || (active && (exitMenuOpen || hasIncomingRestartRequest()))) return;
   event.preventDefault(); input[key] = active;
   const signature = JSON.stringify(input); if (signature !== sentInput.signature) { sentInput.signature = signature; socket.emit('input:update', input); }
@@ -266,6 +266,7 @@ function renderHud() {
     const cooldownMs = player.power === 'dash' ? player.dashCooldownMs :
       player.power === 'snowball' ? player.snowballCooldownMs :
         player.power === 'wall-gun' ? player.wallGunCooldownMs :
+        player.power === 'wall-drill' ? player.wallDrillCooldownMs :
         player.power === 'realm-shift' ? player.realmCooldownMs : 0;
     const cooldown = player.id === myId && cooldownMs > 0 ? ` · ${Math.ceil(cooldownMs / 100) / 10}s` : '';
     return `<div class="score"><span>${escapeHtml(player.name)}${player.id === myId ? ' · YOU' : ''}</span><b>${player.score}</b><em>${escapeHtml(power)}${cooldown}</em></div>`;
@@ -333,6 +334,7 @@ function drawPlayers(view) {
   const players = visiblePlayers();
   ctx.save(); applyCamera(view);
   players.forEach((player) => {
+    drawDrillTrail(player);
     ctx.fillStyle = player.role === 'chaser' ? '#fb7185' : '#67e8f9';
     if (spectating && player.inRealm) {
       ctx.shadowColor = '#e879f9';
@@ -340,6 +342,7 @@ function drawPlayers(view) {
     }
     ctx.fillRect(player.position.x, player.position.y, config.player.width, config.player.height);
     ctx.shadowBlur = 0;
+    drawDrillHead(player);
   });
   ctx.restore();
   players.forEach((player) => {
@@ -350,7 +353,7 @@ function drawPlayers(view) {
     drawPowerMeter(player, centerX, topY - 25);
     ctx.fillStyle = '#e9edf6'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
     ctx.fillText(`${player.name}${player.id === myId ? ' (YOU)' : ''}`, centerX, topY - 8);
-    ctx.fillStyle = player.inRealm ? '#e879f9' : isChaser ? '#fb7185' : '#67e8f9'; ctx.font = 'bold 11px system-ui'; ctx.fillText(`${player.inRealm ? 'SHADOW ' : ''}${isChaser ? 'TAGGER' : 'RUNNER'}`, centerX, bottomY + 14);
+    ctx.fillStyle = player.drill ? '#6ee7b7' : player.inRealm ? '#e879f9' : isChaser ? '#fb7185' : '#67e8f9'; ctx.font = 'bold 11px system-ui'; ctx.fillText(player.drill ? `${player.drill.phase.toUpperCase()} DRILL` : `${player.inRealm ? 'SHADOW ' : ''}${isChaser ? 'TAGGER' : 'RUNNER'}`, centerX, bottomY + 14);
     if (player.stunnedMs > 0) {
       const stunRatio = clamp(player.stunnedMs / config.powers.snowball.stunMs, 0, 1);
       const indicatorY = topY - 43;
@@ -364,6 +367,66 @@ function drawPlayers(view) {
     }
   });
 }
+function drillPhaseProgress(drill) {
+  const power = config.powers['wall-drill'];
+  const recoilRatio = power.recoilDurationMs / power.drillDurationMs;
+  if (drill.phase === 'recoil') return clamp(drill.progress / recoilRatio, 0, 1);
+  return clamp((drill.progress - recoilRatio) / (1 - recoilRatio), 0, 1);
+}
+function drawDrillTrail(player) {
+  if (!player.drill || player.drill.phase !== 'slam') return;
+  const direction = player.drill.direction;
+  const progress = drillPhaseProgress(player.drill);
+  const centerX = player.position.x + config.player.width / 2;
+  const centerY = player.position.y + config.player.height / 2;
+  const trailLength = 18 + progress * 44;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = `rgba(52, 211, 153, ${0.3 + progress * 0.5})`;
+  ctx.lineWidth = 14 - progress * 5;
+  ctx.beginPath();
+  ctx.moveTo(centerX - direction.x * trailLength, centerY - direction.y * trailLength);
+  ctx.lineTo(centerX - direction.x * 8, centerY - direction.y * 8);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(209, 250, 229, .8)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
+function drawDrillHead(player) {
+  if (!player.drill) return;
+  const direction = player.drill.direction;
+  const progress = drillPhaseProgress(player.drill);
+  const centerX = player.position.x + config.player.width / 2;
+  const centerY = player.position.y + config.player.height / 2;
+  const angle = Math.atan2(direction.y, direction.x);
+  const wobble = player.drill.phase === 'recoil' ? Math.sin(performance.now() / 35) * 1.5 : 0;
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(angle);
+  ctx.translate(wobble, 0);
+  ctx.fillStyle = '#34d399';
+  ctx.strokeStyle = '#d1fae5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(7, -13);
+  ctx.lineTo(27, 0);
+  ctx.lineTo(7, 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  const spin = (performance.now() / 70 + progress * Math.PI * 3) % (Math.PI * 2);
+  ctx.strokeStyle = '#064e3b';
+  ctx.lineWidth = 2;
+  for (let offset = 11; offset <= 22; offset += 5) {
+    const halfHeight = (27 - offset) * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(offset, Math.sin(spin + offset) * halfHeight);
+    ctx.lineTo(offset, -Math.sin(spin + offset) * halfHeight);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 function drawPowerMeter(player, centerX, centerY) {
   const power = config.powers[player.power];
   if (!power) return;
@@ -374,6 +437,8 @@ function drawPowerMeter(player, centerX, centerY) {
     readyRatio = 1 - player.snowballCooldownMs / power.cooldownMs;
   } else if (player.power === 'wall-gun') {
     readyRatio = 1 - player.wallGunCooldownMs / power.cooldownMs;
+  } else if (player.power === 'wall-drill') {
+    readyRatio = player.drill ? player.drill.progress : 1 - player.wallDrillCooldownMs / power.cooldownMs;
   } else if (player.power === 'double-jump') {
     readyRatio = player.grounded || player.extraJumpsRemaining > 0 ? 1 : 0;
   } else if (player.power === 'realm-shift') {

@@ -115,7 +115,7 @@ io.on('connection', (socket) => {
       left: Boolean(input.left),
       right: Boolean(input.right),
       dash: Boolean(input.dash),
-      realm: Boolean(input.realm)
+      ability: Boolean(input.ability)
     };
   });
   socket.on('power:select', ({ powerId } = {}) => {

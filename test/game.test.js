@@ -8,6 +8,7 @@ const {
   selectPower,
   fireSnowball,
   fireWallGun,
+  startWallDrill,
   requestRoundRestart,
   respondToRoundRestart,
   tickMatch,
@@ -60,15 +61,17 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
   assert.notEqual(CONFIG, JSON_CONFIG);
   assert.equal(JSON_CONFIG.maps, undefined);
   assert.equal(CONFIG.defaultMapId, 'spire');
-  assert.deepEqual(JSON_CONFIG.enabledMapIds, ['spire', 'crossroads', 'overpass']);
+  assert.deepEqual(JSON_CONFIG.enabledMapIds, ['spire', 'crossroads', 'drillworks', 'overpass']);
   assert.equal(CONFIG.maxSpectatorsPerLobby, 8);
-  assert.deepEqual(Object.keys(CONFIG.maps), ['spire', 'crossroads', 'overpass']);
-  assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.width), [2250, 1680, 2880]);
-  assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.height), [1280, 920, 1040]);
+  assert.deepEqual(Object.keys(CONFIG.maps), ['spire', 'crossroads', 'drillworks', 'overpass']);
+  assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.width), [2250, 1680, 1800, 2880]);
+  assert.deepEqual(Object.values(CONFIG.maps).map((map) => map.arena.height), [1280, 920, 1000, 1040]);
   assert.equal(CONFIG.player.width, 20);
   assert.equal(CONFIG.player.height, 20);
   assert.equal(TEST_MAP.platforms.length, 24);
   assert.equal(TEST_MAP.jumpPads.length, 6);
+  assert.equal(CONFIG.maps.drillworks.platforms.length, 12);
+  assert.equal(CONFIG.maps.drillworks.jumpPads.length, 4);
   assert.equal(CONFIG.camera.deadZoneX, 135);
   assert.equal(CONFIG.camera.deadZoneY, 135);
   assert.equal(CONFIG.camera.minViewWidth, 700);
@@ -82,6 +85,11 @@ test('every selectable map keeps its geometry, jump pads, and spawns inside its 
   assert.equal(CONFIG.powers['wall-gun'].maxWallLength, 250);
   assert.equal(CONFIG.powers['wall-gun'].wallThickness, 20);
   assert.equal(CONFIG.powers['wall-gun'].wallDurationMs, 3_000);
+  assert.equal(CONFIG.powers['wall-drill'].drillDurationMs, 750);
+  assert.equal(CONFIG.powers['wall-drill'].recoilDurationMs, 180);
+  assert.equal(CONFIG.powers['wall-drill'].recoilDistance, 24);
+  assert.equal(CONFIG.powers['wall-drill'].maxThickness, 60);
+  assert.equal(CONFIG.powers['wall-drill'].cooldownMs, 10_000);
   assert.equal(CONFIG.powers.dash.meterColor, '#fb923c');
   assert.equal(CONFIG.powers['double-jump'].meterColor, '#c084fc');
   assert.equal(CONFIG.powers.snowball.meterColor, '#7dd3fc');
@@ -698,6 +706,295 @@ test('the side route supports a normal jump between consecutive platforms', () =
   assert.equal(landedOnUpperPlatform, true);
 });
 
+test('Drillworks provides safe permanent drill routes in all four directions', () => {
+  const routes = [
+    { start: { x: 864, y: 940 }, input: 'right', direction: { x: 1, y: 0 }, exit: { x: 916, y: 940 } },
+    { start: { x: 916, y: 940 }, input: 'left', direction: { x: -1, y: 0 }, exit: { x: 864, y: 940 } },
+    { start: { x: 800, y: 580 }, input: 'down', direction: { x: 0, y: 1 }, exit: { x: 800, y: 624 } },
+    { start: { x: 800, y: 624 }, input: 'up', direction: { x: 0, y: -1 }, exit: { x: 800, y: 580 } }
+  ];
+
+  routes.forEach((route) => {
+    const match = createMatch(players(), 'drillworks');
+    const now = startRound(match, 'wall-drill', 'dash');
+    const driller = match.players.find((player) => player.power === 'wall-drill');
+    const other = match.players.find((player) => player.id !== driller.id);
+    driller.position = { ...route.start };
+    other.position = { x: 1_680, y: 940 };
+    driller.input[route.input] = true;
+    driller.input.ability = true;
+
+    tickMatch(match, 0, now);
+    assert.deepEqual(driller.wallDrill?.direction, route.direction);
+    driller.input[route.input] = false;
+    driller.input.ability = false;
+    tickMatch(match, 0.75, now + 750);
+
+    assert.deepEqual(driller.position, route.exit);
+    assert.equal(driller.wallDrill, null);
+    assert.equal(driller.wallDrillCooldownRemaining, 10);
+  });
+});
+
+test('the Drillworks top-center platform is reachable with a normal jump', () => {
+  const match = createMatch(players(), 'drillworks');
+  const now = startRound(match, 'double-jump', 'dash');
+  const player = match.players[0];
+  const other = match.players[1];
+  const sidePlatform = CONFIG.maps.drillworks.platforms.find((platform) =>
+    platform.x === 180 && platform.y === 430
+  );
+  const topPlatform = CONFIG.maps.drillworks.platforms.find((platform) =>
+    platform.x === 700 && platform.y === 290
+  );
+  player.position = {
+    x: sidePlatform.x + sidePlatform.width - CONFIG.player.width,
+    y: sidePlatform.y - CONFIG.player.height
+  };
+  player.velocity = { x: 0, y: 0 };
+  player.grounded = true;
+  other.position = { x: 1_680, y: 940 };
+  player.input.up = true;
+  player.input.right = true;
+
+  tickMatch(match, 0.016, now + 16);
+  player.input.up = false;
+  let landedOnTop = false;
+  for (let step = 2; step <= 80; step += 1) {
+    tickMatch(match, 0.016, now + step * 16);
+    if (player.grounded && player.position.y === topPlatform.y - CONFIG.player.height) {
+      landedOnTop = true;
+      break;
+    }
+  }
+
+  assert.equal(landedOnTop, true);
+});
+
+test('wall drill recoils and then passes horizontally through a temporary wall without changing it', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-drill', 'dash');
+  const driller = match.players.find((player) => player.power === 'wall-drill');
+  const other = match.players.find((player) => player.id !== driller.id);
+  driller.position = { x: 480, y: 600 };
+  other.position = { x: 1_000, y: 800 };
+  match.walls.push({ id: 1, ownerId: other.id, lifetimeRemaining: 3, x: 500, y: 500, width: 20, height: 200 });
+  driller.input.right = true;
+  driller.input.ability = true;
+
+  tickMatch(match, 0, now);
+
+  assert.equal(driller.wallDrill?.phase, 'recoil');
+  assert.deepEqual(driller.wallDrill?.direction, { x: 1, y: 0 });
+  assert.equal(publicMatch(match).players.find((player) => player.id === driller.id).drill.progress, 0);
+  driller.input.ability = false;
+  driller.input.right = false;
+  tickMatch(match, 0.18, now + 180);
+  assert.deepEqual(driller.position, { x: 456, y: 600 });
+  assert.equal(driller.wallDrill?.phase, 'recoil');
+
+  tickMatch(match, 0.57, now + 750);
+
+  assert.deepEqual(driller.position, { x: 520, y: 600 });
+  assert.equal(driller.wallDrill, null);
+  assert.equal(driller.wallDrillCooldownRemaining, 10);
+  assert.equal(match.walls.length, 1);
+  assert.deepEqual(
+    { x: match.walls[0].x, y: match.walls[0].y, width: match.walls[0].width, height: match.walls[0].height },
+    { x: 500, y: 500, width: 20, height: 200 }
+  );
+  const publicDriller = publicMatch(match).players.find((player) => player.id === driller.id);
+  assert.equal(publicDriller.drill, null);
+  assert.equal(publicDriller.wallDrillCooldownMs, 10_000);
+});
+
+test('wall drill traverses from the right and accepts exactly the maximum wall thickness', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-drill', 'dash');
+  const driller = match.players.find((player) => player.power === 'wall-drill');
+  const other = match.players.find((player) => player.id !== driller.id);
+  driller.position = { x: 560, y: 600 };
+  other.position = { x: 1_000, y: 800 };
+  match.walls.push({ id: 1, ownerId: other.id, lifetimeRemaining: 3, x: 500, y: 500, width: 60, height: 200 });
+  driller.input.left = true;
+  driller.input.ability = true;
+
+  tickMatch(match, 0, now);
+  assert.deepEqual(driller.wallDrill?.direction, { x: -1, y: 0 });
+  driller.input.left = false;
+  driller.input.ability = false;
+  tickMatch(match, 0.75, now + 750);
+
+  assert.deepEqual(driller.position, { x: 480, y: 600 });
+  assert.equal(driller.wallDrillCooldownRemaining, 10);
+  assert.equal(startWallDrill(match, driller.id), false);
+});
+
+test('wall drill passes down through a thin platform and up through its underside', () => {
+  for (const scenario of [
+    { startY: 550, input: 'down', direction: { x: 0, y: 1 }, recoilY: 526, exitY: 594, grounded: false },
+    { startY: 594, input: 'up', direction: { x: 0, y: -1 }, recoilY: 618, exitY: 550, grounded: true }
+  ]) {
+    const match = createMatch(players(), 'crossroads');
+    const now = startRound(match, 'wall-drill', 'dash');
+    const driller = match.players.find((player) => player.power === 'wall-drill');
+    const other = match.players.find((player) => player.id !== driller.id);
+    driller.position = { x: 600, y: scenario.startY };
+    other.position = { x: 1_000, y: 800 };
+    driller.input[scenario.input] = true;
+    driller.input.ability = true;
+
+    tickMatch(match, 0, now);
+    assert.deepEqual(driller.wallDrill?.direction, scenario.direction);
+    driller.input.ability = false;
+    driller.input[scenario.input] = false;
+    tickMatch(match, 0.18, now + 180);
+    assert.equal(driller.position.y, scenario.recoilY);
+    tickMatch(match, 0.57, now + 750);
+
+    assert.equal(driller.position.y, scenario.exitY);
+    assert.equal(driller.grounded, scenario.grounded);
+    assert.equal(driller.wallDrillCooldownRemaining, 10);
+  }
+});
+
+test('wall drill rejects oversized walls, blocked routes, arena exits, and partial corner contact', () => {
+  const scenarios = [
+    {
+      player: { x: 480, y: 600 },
+      walls: [{ id: 1, ownerId: 'builder', x: 500, y: 500, width: 61, height: 200 }],
+      input: 'right'
+    },
+    {
+      player: { x: 480, y: 600 },
+      walls: [
+        { id: 1, ownerId: 'builder', x: 500, y: 500, width: 20, height: 200 },
+        { id: 2, ownerId: 'builder-2', x: 520, y: 500, width: 20, height: 200 }
+      ],
+      input: 'right'
+    },
+    {
+      player: { x: 100, y: 860 },
+      walls: [],
+      input: 'down'
+    },
+    {
+      player: { x: 480, y: 590 },
+      walls: [{ id: 1, ownerId: 'builder', x: 500, y: 600, width: 20, height: 200 }],
+      input: 'right'
+    }
+  ];
+
+  scenarios.forEach((scenario) => {
+    const match = createMatch(players(), 'crossroads');
+    const now = startRound(match, 'wall-drill', 'dash');
+    const driller = match.players.find((player) => player.power === 'wall-drill');
+    match.players.find((player) => player.id !== driller.id).position = { x: 1_000, y: 800 };
+    driller.position = scenario.player;
+    match.walls = scenario.walls;
+    driller.input[scenario.input] = true;
+    driller.input.ability = true;
+
+    tickMatch(match, 0, now);
+
+    assert.equal(driller.wallDrill, null);
+    assert.equal(driller.wallDrillCooldownRemaining, 0);
+  });
+});
+
+test('wall drill cancels safely without cooldown when stunned inside a wall', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-drill', 'dash');
+  const driller = match.players.find((player) => player.power === 'wall-drill');
+  const other = match.players.find((player) => player.id !== driller.id);
+  driller.position = { x: 480, y: 600 };
+  other.position = { x: 1_000, y: 800 };
+  match.walls.push({ id: 1, ownerId: other.id, lifetimeRemaining: 3, x: 500, y: 500, width: 20, height: 200 });
+  driller.input.right = true;
+  driller.input.ability = true;
+  tickMatch(match, 0, now);
+  driller.input.ability = false;
+  driller.input.right = false;
+  tickMatch(match, 0.6, now + 600);
+  assert.ok(driller.position.x > 480 && driller.position.x < 500);
+
+  driller.stunRemaining = 1;
+  tickMatch(match, 0.016, now + 616);
+
+  assert.deepEqual(driller.position, { x: 480, y: 600 });
+  assert.equal(driller.wallDrill, null);
+  assert.equal(driller.wallDrillCooldownRemaining, 0);
+});
+
+test('a snowball hit cancels an active wall drill in the same simulation tick', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'wall-drill', 'snowball');
+  const driller = match.players.find((player) => player.power === 'wall-drill');
+  const shooter = match.players.find((player) => player.power === 'snowball');
+  driller.position = { x: 480, y: 600 };
+  shooter.position = { x: 400, y: 600 };
+  match.walls.push({ id: 1, ownerId: shooter.id, lifetimeRemaining: 3, x: 500, y: 500, width: 20, height: 200 });
+  driller.input.right = true;
+  driller.input.ability = true;
+  tickMatch(match, 0, now);
+  driller.input.right = false;
+  driller.input.ability = false;
+  tickMatch(match, 0.2, now + 200);
+  assert.ok(driller.wallDrill);
+  shooter.position = { x: 400, y: 600 };
+  shooter.velocity = { x: 0, y: 0 };
+  assert.equal(fireSnowball(match, shooter.id, { x: 480, y: 610 }), true);
+
+  tickMatch(match, 0.05, now + 250);
+
+  assert.equal(driller.wallDrill, null);
+  assert.deepEqual(driller.position, { x: 480, y: 600 });
+  assert.ok(driller.stunRemaining > 0);
+  assert.equal(driller.wallDrillCooldownRemaining, 0);
+});
+
+test('wall drill cancels when its temporary target expires or a new obstacle blocks its path', () => {
+  for (const obstruction of ['expiry', 'new-wall']) {
+    const match = createMatch(players(), 'crossroads');
+    const now = startRound(match, 'wall-drill', 'dash');
+    const driller = match.players.find((player) => player.power === 'wall-drill');
+    const other = match.players.find((player) => player.id !== driller.id);
+    driller.position = { x: 480, y: 600 };
+    other.position = { x: 1_000, y: 800 };
+    match.walls.push({ id: 1, ownerId: other.id, lifetimeRemaining: obstruction === 'expiry' ? 0.25 : 3, x: 500, y: 500, width: 20, height: 200 });
+    driller.input.right = true;
+    driller.input.ability = true;
+    tickMatch(match, 0, now);
+    driller.input.ability = false;
+    driller.input.right = false;
+    tickMatch(match, 0.2, now + 200);
+    if (obstruction === 'new-wall') {
+      match.walls.push({ id: 2, ownerId: 'new-builder', lifetimeRemaining: 3, x: 520, y: 500, width: 20, height: 200 });
+      tickMatch(match, 0.01, now + 210);
+    } else {
+      tickMatch(match, 0.06, now + 260);
+    }
+
+    assert.equal(driller.wallDrill, null);
+    assert.equal(driller.wallDrillCooldownRemaining, 0);
+    assert.deepEqual(driller.position, { x: 480, y: 600 });
+  }
+});
+
+test('wall drill activation stays server-authoritative and requires the selected power', () => {
+  const match = createMatch(players(), 'crossroads');
+  const now = startRound(match, 'dash', 'double-jump');
+  const player = match.players[0];
+  player.position = { x: 480, y: 600 };
+  match.players[1].position = { x: 1_000, y: 800 };
+  match.walls.push({ id: 1, ownerId: 'builder', x: 500, y: 500, width: 20, height: 200 });
+
+  assert.equal(startWallDrill(match, player.id), false);
+  assert.equal(startWallDrill(match, 'missing-player'), false);
+  assert.equal(player.wallDrill, null);
+  tickMatch(match, 0, now);
+});
+
 test('realm shift prevents tagging for two seconds and starts its cooldown', () => {
   const match = createMatch(players());
   const now = startRound(match, 'realm-shift', 'dash');
@@ -705,7 +1002,7 @@ test('realm shift prevents tagging for two seconds and starts its cooldown', () 
   const chaser = match.players.find((player) => player.id !== runner.id);
   runner.position = { x: 500, y: 1220 };
   chaser.position = { ...runner.position };
-  runner.input.realm = true;
+  runner.input.ability = true;
 
   tickMatch(match, 0.016, now + 16);
 
@@ -714,7 +1011,7 @@ test('realm shift prevents tagging for two seconds and starts its cooldown', () 
   assert.equal(runner.realmCooldownRemaining, CONFIG.powers['realm-shift'].cooldownMs / 1000);
   assert.equal(publicMatch(match).players.find((player) => player.id === runner.id).inRealm, true);
 
-  runner.input.realm = false;
+  runner.input.ability = false;
   tickMatch(match, 1.99, now + 2_006);
   assert.equal(match.phase, 'playing');
   tickMatch(match, 0.02, now + 2_026);
@@ -729,9 +1026,9 @@ test('snowballs cannot hit a player in another realm', () => {
   const shooter = match.players.find((player) => player.power === 'snowball');
   shooter.position = { x: 100, y: 1220 };
   shiftedPlayer.position = { x: 400, y: 1220 };
-  shiftedPlayer.input.realm = true;
+  shiftedPlayer.input.ability = true;
   tickMatch(match, 0.016, now + 16);
-  shiftedPlayer.input.realm = false;
+  shiftedPlayer.input.ability = false;
 
   assert.equal(fireSnowball(match, shooter.id, { x: 800, y: 1230 }), true);
   tickMatch(match, 0.35, now + 366);
