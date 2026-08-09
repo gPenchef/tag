@@ -60,10 +60,12 @@ The host’s map choice is server-authoritative and remains active for every rem
 | Jump | `Space` or Up Arrow |
 | Dash | `Shift` when Dash is selected |
 | Realm Shift | `E` when Realm Shift is selected |
+| Wall Drill | Touch a wall and press `E`; hold a direction to choose a side at corners |
 | Snowball aim | Mouse position |
 | Snowball fire | Left mouse button when Snowball Gun is selected |
+| Wall Gun aim/fire | Mouse position / left mouse button when Wall Gun is selected |
 
-Controls are only captured while the game screen is active. Snowball aiming uses the current camera view to convert the pointer into world coordinates.
+Controls are only captured while the game screen is active. Gun aiming uses the current camera view to convert the pointer into world coordinates.
 
 ## Powers
 
@@ -72,6 +74,8 @@ Power definitions are in `shared/game-config.json` under `powers`.
 - **Dash**: a short horizontal burst with a 1.25 second cooldown.
 - **Double Jump**: grants one additional airborne jump and refreshes on landing.
 - **Snowball Gun**: fires a server-authoritative projectile and stuns the other player for 1.5 seconds. Cooldown: 7 seconds.
+- **Wall Gun**: fires a server-authoritative projectile that builds one temporary wall perpendicular to the surface it hits. Cooldown: 15 seconds.
+- **Wall Drill**: press `E` while touching a wall no more than 60 pixels thick. The player physically recoils, then slams through to a server-validated exit while remaining vulnerable. Cooldown: 10 seconds.
 - **Realm Shift**: separates the activating player for 2 seconds. Players in different realms cannot tag or hit one another. Cooldown: 15 seconds.
 
 Cooldown values, movement values, projectile values, and visual meter colors can be adjusted in the JSON configuration. Restart the server after changing it.
@@ -79,6 +83,8 @@ Cooldown values, movement values, projectile values, and visual meter colors can
 ## Maps and configuration
 
 `shared/game-config.json` holds shared gameplay settings. Every map lives in its own validated JSON file in `shared/maps/`; `shared/game-config.js` loads them dynamically, while `server.js` exposes the resulting data at `/game-config.js` for the browser.
+
+**Drillworks** is the Wall Drill showcase map. Its 24px decks support upward and downward drilling, its 32px partitions support left and right drilling, and jump-pad routes keep the arena playable when neither player selects Wall Drill.
 
 Friend-created maps use one self-contained JSON export. Import one with:
 
@@ -153,9 +159,9 @@ Client-to-server events:
 - `lobby:create` with `{ name, mapId }`
 - `lobby:join` with `{ name, code }`
 - `lobby:leave`
-- `input:update` with movement and ability button states
+- `input:update` with boolean `up`, `down`, `left`, `right`, `dash`, and `ability` button states
 - `power:select` with `{ powerId }`
-- `power:use` with `{ target: { x, y } }` for Snowball Gun
+- `power:use` with `{ target: { x, y } }` for Snowball Gun and Wall Gun
 - `match:rematch`
 
 Server-to-client events:
@@ -175,7 +181,7 @@ Run the full test suite with:
 npm test
 ```
 
-The tests cover power-selection order, all existing movement mechanics, dashes, double jumps, snowballs, stun timing, realm separation, jump pads, tagging, timeout, role swaps, map geometry, selected-map spawns and bounds, and lobby map propagation.
+The tests cover power-selection order, movement, dashes, double jumps, snowballs, wall construction, horizontal and vertical wall drilling, unsafe drill rejection and cancellation, stun timing, realm separation, jump pads, tagging, timeout, role swaps, map geometry, selected-map spawns and bounds, and lobby map propagation.
 
 ## Balancing workflow
 

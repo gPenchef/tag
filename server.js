@@ -14,7 +14,7 @@ const {
 const {
   createMatch,
   selectPower,
-  fireSnowball,
+  firePowerProjectile,
   requestRoundRestart,
   respondToRoundRestart,
   tickMatch,
@@ -169,6 +169,7 @@ io.on("connection", (socket) => {
       right: Boolean(input.right),
       dash: Boolean(input.dash),
       realm: Boolean(input.realm),
+      ability: Boolean(input.ability),
     };
   });
   socket.on("power:select", ({ powerId } = {}) => {
@@ -180,7 +181,7 @@ io.on("connection", (socket) => {
   socket.on("power:use", ({ target } = {}) => {
     const lobby = lobbies.get(socket.data.lobbyCode);
     const match = lobby?.match;
-    if (!match || !fireSnowball(match, socket.id, target)) return;
+    if (!match || !firePowerProjectile(match, socket.id, target)) return;
     emitMatch(lobby);
   });
   socket.on("round:restart:request", () => {

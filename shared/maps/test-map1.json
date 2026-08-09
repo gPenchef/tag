@@ -1,0 +1,45 @@
+{
+  "id": "test-map1",
+  "name": "Untitled Map",
+  "description": "A custom arena.",
+  "arena": {
+    "width": 1800,
+    "height": 1000
+  },
+  "theme": {
+    "skyTop": "#17283d",
+    "skyBottom": "#0a0d12",
+    "accent": "#67e8f9"
+  },
+  "platforms": [
+    {
+      "x": 0,
+      "y": 960,
+      "width": 1800,
+      "height": 40
+    },
+    {
+      "x": 380,
+      "y": 300,
+      "width": 460,
+      "height": 20
+    },
+    {
+      "x": 1360,
+      "y": 340,
+      "width": 140,
+      "height": 40
+    }
+  ],
+  "jumpPads": [],
+  "spawns": [
+    {
+      "x": 120,
+      "y": 940
+    },
+    {
+      "x": 1660,
+      "y": 940
+    }
+  ]
+}

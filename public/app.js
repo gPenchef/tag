@@ -35,6 +35,7 @@ const input = {
   right: false,
   dash: false,
   realm: false,
+  ability: false,
 };
 
 function show(name) {
@@ -198,6 +199,39 @@ function escapeHtml(text) {
   node.textContent = text;
   return node.innerHTML;
 }
+function renderHud() {
+  if (!state) return;
+  $("#scoreboard").innerHTML = state.players
+    .map((player) => {
+      const power = player.power
+        ? config.powers[player.power]?.name
+        : "Choosing...";
+      const cooldownMs =
+        player.power === "dash"
+          ? player.dashCooldownMs
+          : player.power === "snowball"
+            ? player.snowballCooldownMs
+            : player.power === "wall-gun"
+              ? player.wallGunCooldownMs
+              : player.power === "wall-drill"
+                ? player.wallDrillCooldownMs
+                : player.power === "realm-shift"
+                  ? player.realmCooldownMs
+                  : 0;
+      const cooldown =
+        player.id === myId && cooldownMs > 0
+          ? ` · ${Math.ceil(cooldownMs / 100) / 10}s`
+          : "";
+      return `<div class="score"><span>${escapeHtml(player.name)}${player.id === myId ? " · YOU" : ""}</span><b>${player.score}</b><em>${escapeHtml(power)}${cooldown}</em></div>`;
+    })
+    .join("");
+  $("#spectator-badge").classList.toggle("hidden", !spectating);
+  const me = myPlayer();
+  canvas.style.cursor =
+    state.phase === "playing" && ["snowball", "wall-gun"].includes(me?.power)
+      ? "crosshair"
+      : "default";
+}
 function setInput(event, active) {
   const keyMap = {
     Space: "up",
@@ -245,8 +279,9 @@ addEventListener("blur", clearInput);
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || state?.phase !== "playing") return;
   const me = state.players.find((player) => player.id === myId);
-  if (me?.power !== "snowball" || me.snowballCooldownMs > 0 || me.stunnedMs > 0)
-    return;
+  const gunCooldownMs = me?.power === "snowball" ? me.snowballCooldownMs :
+    me?.power === "wall-gun" ? me.wallGunCooldownMs : null;
+  if (gunCooldownMs === null || gunCooldownMs > 0 || me.stunnedMs > 0) return;
   const bounds = canvas.getBoundingClientRect();
   const canvasX = ((event.clientX - bounds.left) * canvas.width) / bounds.width;
   const canvasY =
@@ -536,9 +571,13 @@ function render(dt = 0.016) {
           ? player.dashCooldownMs
           : player.power === "snowball"
             ? player.snowballCooldownMs
-            : player.power === "realm-shift"
-              ? player.realmCooldownMs
-              : 0;
+            : player.power === "wall-gun"
+              ? player.wallGunCooldownMs
+              : player.power === "wall-drill"
+                ? player.wallDrillCooldownMs
+                : player.power === "realm-shift"
+                  ? player.realmCooldownMs
+                  : 0;
       const cooldown =
         player.id === myId && cooldownMs > 0
           ? ` · ${Math.ceil(cooldownMs / 100) / 10}s`
@@ -549,7 +588,7 @@ function render(dt = 0.016) {
   $("#spectator-badge").classList.toggle("hidden", !spectating);
   const me = myPlayer();
   canvas.style.cursor =
-    state.phase === "playing" && me?.power === "snowball"
+    state.phase === "playing" && (me?.power === "snowball" || me?.power === "wall-gun")
       ? "crosshair"
       : "default";
   const view = updateCamera();
@@ -585,6 +624,13 @@ function drawArena(view) {
     ctx.fillStyle = inRealm ? "#e879f9" : map.theme.accent;
     ctx.fillRect(platform.x, platform.y, platform.width, 4);
   });
+  (state.walls || []).forEach((wall) => {
+    ctx.fillStyle = '#d97706';
+    ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
+    ctx.strokeStyle = '#fde68a';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(wall.x + 1.5, wall.y + 1.5, wall.width - 3, wall.height - 3);
+  });
   map.jumpPads.forEach((pad) => {
     ctx.fillStyle = "#a3e635";
     ctx.fillRect(pad.x, pad.y, pad.width, pad.height);
@@ -607,6 +653,7 @@ function drawPlayers(view) {
 
   // 1. Draw the player rectangles in SCREEN space to prevent subpixel flickering
   players.forEach((player) => {
+    drawDrillTrail(player);
     const px = player.renderX ?? player.position.x;
     const py = player.renderY ?? player.position.y;
 
@@ -622,6 +669,7 @@ function drawPlayers(view) {
     }
     ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
     ctx.shadowBlur = 0;
+    drawDrillHead(player);
   });
 
   // 2. Draw text, power meters, and stun indicators in screen space
@@ -647,19 +695,12 @@ function drawPlayers(view) {
       topY - 8,
     );
 
-    ctx.fillStyle = player.inRealm
-      ? "#e879f9"
-      : isChaser
-        ? "#fb7185"
-        : "#67e8f9";
+    const roleText = player.drill
+      ? `${player.drill.phase.toUpperCase()} DRILL`
+      : `${player.inRealm ? "SHADOW " : ""}${isChaser ? "TAGGER" : "RUNNER"}`;
+    ctx.fillStyle = player.drill ? "#6ee7b7" : player.inRealm ? "#e879f9" : isChaser ? "#fb7185" : "#67e8f9";
     ctx.font = "bold 11px system-ui";
-    ctx.fillText(
-      `${player.inRealm ? "SHADOW " : ""}${isChaser ? "TAGGER" : "RUNNER"}`,
-      centerX,
-      bottomY + 14,
-    );
-
-    if (player.stunnedMs > 0) {
+    ctx.fillText(roleText, centerX, bottomY + 14);
       const stunRatio = clamp(
         player.stunnedMs / config.powers.snowball.stunMs,
         0,
@@ -688,6 +729,67 @@ function drawPlayers(view) {
   });
 }
 
+function drillPhaseProgress(drill) {
+  const power = config.powers['wall-drill'];
+  const recoilRatio = power.recoilDurationMs / power.drillDurationMs;
+  if (drill.phase === 'recoil') return clamp(drill.progress / recoilRatio, 0, 1);
+  return clamp((drill.progress - recoilRatio) / (1 - recoilRatio), 0, 1);
+}
+function drawDrillTrail(player) {
+  if (!player.drill || player.drill.phase !== 'slam') return;
+  const direction = player.drill.direction;
+  const progress = drillPhaseProgress(player.drill);
+  const centerX = player.position.x + config.player.width / 2;
+  const centerY = player.position.y + config.player.height / 2;
+  const trailLength = 18 + progress * 44;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = `rgba(52, 211, 153, ${0.3 + progress * 0.5})`;
+  ctx.lineWidth = 14 - progress * 5;
+  ctx.beginPath();
+  ctx.moveTo(centerX - direction.x * trailLength, centerY - direction.y * trailLength);
+  ctx.lineTo(centerX - direction.x * 8, centerY - direction.y * 8);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(209, 250, 229, .8)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
+function drawDrillHead(player) {
+  if (!player.drill) return;
+  const direction = player.drill.direction;
+  const progress = drillPhaseProgress(player.drill);
+  const centerX = player.position.x + config.player.width / 2;
+  const centerY = player.position.y + config.player.height / 2;
+  const angle = Math.atan2(direction.y, direction.x);
+  const wobble = player.drill.phase === 'recoil' ? Math.sin(performance.now() / 35) * 1.5 : 0;
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(angle);
+  ctx.translate(wobble, 0);
+  ctx.fillStyle = '#34d399';
+  ctx.strokeStyle = '#d1fae5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(7, -13);
+  ctx.lineTo(27, 0);
+  ctx.lineTo(7, 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  const spin = (performance.now() / 70 + progress * Math.PI * 3) % (Math.PI * 2);
+  ctx.strokeStyle = '#064e3b';
+  ctx.lineWidth = 2;
+  for (let offset = 11; offset <= 22; offset += 5) {
+    const halfHeight = (27 - offset) * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(offset, Math.sin(spin + offset) * halfHeight);
+    ctx.lineTo(offset, -Math.sin(spin + offset) * halfHeight);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawPowerMeter(player, centerX, centerY) {
   const power = config.powers[player.power];
   if (!power) return;
@@ -696,6 +798,10 @@ function drawPowerMeter(player, centerX, centerY) {
     readyRatio = 1 - player.dashCooldownMs / power.cooldownMs;
   } else if (player.power === "snowball") {
     readyRatio = 1 - player.snowballCooldownMs / power.cooldownMs;
+  } else if (player.power === "wall-gun") {
+    readyRatio = 1 - player.wallGunCooldownMs / power.cooldownMs;
+  } else if (player.power === "wall-drill") {
+    readyRatio = player.drill ? player.drill.progress : 1 - player.wallDrillCooldownMs / power.cooldownMs;
   } else if (player.power === "double-jump") {
     readyRatio = player.grounded || player.extraJumpsRemaining > 0 ? 1 : 0;
   } else if (player.power === "realm-shift") {
@@ -722,11 +828,12 @@ function drawProjectiles(view) {
     .forEach((projectile) => {
       const px = projectile.renderX ?? projectile.position.x;
       const py = projectile.renderY ?? projectile.position.y;
-
-      ctx.fillStyle = projectile.inRealm ? "#f0abfc" : "#f8fafc";
-      ctx.strokeStyle = projectile.inRealm ? "#d946ef" : "#bae6fd";
+      const wallShot = projectile.type === 'wall-gun';
+      const power = config.powers[projectile.type] || config.powers.snowball;
+      ctx.fillStyle = wallShot ? "#fbbf24" : projectile.inRealm ? "#f0abfc" : "#f8fafc";
+      ctx.strokeStyle = wallShot ? "#fef3c7" : projectile.inRealm ? "#d946ef" : "#bae6fd";
       ctx.beginPath();
-      ctx.arc(px, py, config.powers.snowball.projectileRadius, 0, Math.PI * 2);
+      ctx.arc(px, py, power.projectileRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     });
