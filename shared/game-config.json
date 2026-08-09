@@ -1,12 +1,13 @@
 {
   "defaultMapId": "spire",
-  "enabledMapIds": ["spire", "crossroads", "overpass"],
+  "enabledMapIds": ["spire", "crossroads", "drillworks", "overpass"],
   "maxSpectatorsPerLobby": 8,
   "camera": {
     "minViewWidth": 700,
     "paddingX": 220,
     "paddingY": 130,
     "deadZoneX": 135,
+    "deadZoneY": 135,
     "zoomInSmoothing": 0.12,
     "zoomOutAcceleration": 2600,
     "zoomOutDeceleration": 900,
@@ -52,6 +53,28 @@
       "projectileLifetimeMs": 2500,
       "cooldownMs": 7000,
       "stunMs": 1500
+    },
+    "wall-gun": {
+      "name": "Wall Gun",
+      "description": "Shoot terrain to build one perpendicular wall for 3 seconds. Recharges in 15 seconds.",
+      "meterColor": "#fbbf24",
+      "projectileSpeed": 900,
+      "projectileRadius": 9,
+      "projectileLifetimeMs": 2500,
+      "cooldownMs": 15000,
+      "wallThickness": 20,
+      "maxWallLength": 250,
+      "wallDurationMs": 3000
+    },
+    "wall-drill": {
+      "name": "Wall Drill",
+      "description": "Press E at a wall up to 60px thick to recoil, then slam through it. Recharges in 10 seconds.",
+      "meterColor": "#34d399",
+      "drillDurationMs": 750,
+      "recoilDurationMs": 180,
+      "recoilDistance": 24,
+      "maxThickness": 60,
+      "cooldownMs": 10000
     },
     "realm-shift": {
       "name": "Realm Shift",

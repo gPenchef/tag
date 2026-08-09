@@ -1,0 +1,128 @@
+{
+  "id": "drillworks",
+  "name": "Drillworks",
+  "description": "A mirrored factory of thin partitions, drillable decks, and fast alternate routes.",
+  "arena": {
+    "width": 1800,
+    "height": 1000
+  },
+  "theme": {
+    "skyTop": "#16352f",
+    "skyBottom": "#071412",
+    "accent": "#34d399"
+  },
+  "platforms": [
+    {
+      "x": 0,
+      "y": 960,
+      "width": 1800,
+      "height": 40
+    },
+    {
+      "x": 220,
+      "y": 800,
+      "width": 400,
+      "height": 24
+    },
+    {
+      "x": 1180,
+      "y": 800,
+      "width": 400,
+      "height": 24
+    },
+    {
+      "x": 650,
+      "y": 600,
+      "width": 500,
+      "height": 24
+    },
+    {
+      "x": 180,
+      "y": 430,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 1200,
+      "y": 430,
+      "width": 420,
+      "height": 24
+    },
+    {
+      "x": 700,
+      "y": 290,
+      "width": 400,
+      "height": 24
+    },
+    {
+      "x": 884,
+      "y": 624,
+      "width": 32,
+      "height": 336
+    },
+    {
+      "x": 444,
+      "y": 180,
+      "width": 32,
+      "height": 250
+    },
+    {
+      "x": 1324,
+      "y": 180,
+      "width": 32,
+      "height": 250
+    },
+    {
+      "x": 400,
+      "y": 650,
+      "width": 32,
+      "height": 150
+    },
+    {
+      "x": 1368,
+      "y": 650,
+      "width": 32,
+      "height": 150
+    }
+  ],
+  "jumpPads": [
+    {
+      "x": 540,
+      "y": 790,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 930
+    },
+    {
+      "x": 1200,
+      "y": 790,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 930
+    },
+    {
+      "x": 760,
+      "y": 950,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 980
+    },
+    {
+      "x": 980,
+      "y": 950,
+      "width": 60,
+      "height": 10,
+      "launchSpeed": 980
+    }
+  ],
+  "spawns": [
+    {
+      "x": 100,
+      "y": 940
+    },
+    {
+      "x": 1680,
+      "y": 940
+    }
+  ]
+}
