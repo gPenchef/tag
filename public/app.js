@@ -701,6 +701,7 @@ function drawPlayers(view) {
     ctx.fillStyle = player.drill ? "#6ee7b7" : player.inRealm ? "#e879f9" : isChaser ? "#fb7185" : "#67e8f9";
     ctx.font = "bold 11px system-ui";
     ctx.fillText(roleText, centerX, bottomY + 14);
+    if (player.stunnedMs > 0) {
       const stunRatio = clamp(
         player.stunnedMs / config.powers.snowball.stunMs,
         0,
