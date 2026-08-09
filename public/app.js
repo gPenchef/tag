@@ -242,7 +242,7 @@ function setInput(event, active) {
     ArrowRight: "right",
     ShiftLeft: "dash",
     ShiftRight: "dash",
-    KeyE: "realm",
+    KeyE: "ability",
   };
   const key = keyMap[event.code];
   if (
@@ -279,8 +279,12 @@ addEventListener("blur", clearInput);
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || state?.phase !== "playing") return;
   const me = state.players.find((player) => player.id === myId);
-  const gunCooldownMs = me?.power === "snowball" ? me.snowballCooldownMs :
-    me?.power === "wall-gun" ? me.wallGunCooldownMs : null;
+  const gunCooldownMs =
+    me?.power === "snowball"
+      ? me.snowballCooldownMs
+      : me?.power === "wall-gun"
+        ? me.wallGunCooldownMs
+        : null;
   if (gunCooldownMs === null || gunCooldownMs > 0 || me.stunnedMs > 0) return;
   const bounds = canvas.getBoundingClientRect();
   const canvasX = ((event.clientX - bounds.left) * canvas.width) / bounds.width;
@@ -588,7 +592,8 @@ function render(dt = 0.016) {
   $("#spectator-badge").classList.toggle("hidden", !spectating);
   const me = myPlayer();
   canvas.style.cursor =
-    state.phase === "playing" && (me?.power === "snowball" || me?.power === "wall-gun")
+    state.phase === "playing" &&
+    (me?.power === "snowball" || me?.power === "wall-gun")
       ? "crosshair"
       : "default";
   const view = updateCamera();
@@ -625,9 +630,9 @@ function drawArena(view) {
     ctx.fillRect(platform.x, platform.y, platform.width, 4);
   });
   (state.walls || []).forEach((wall) => {
-    ctx.fillStyle = '#d97706';
+    ctx.fillStyle = "#d97706";
     ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
-    ctx.strokeStyle = '#fde68a';
+    ctx.strokeStyle = "#fde68a";
     ctx.lineWidth = 3;
     ctx.strokeRect(wall.x + 1.5, wall.y + 1.5, wall.width - 3, wall.height - 3);
   });
@@ -651,33 +656,39 @@ function drawPlayers(view) {
   const scaleX = canvas.width / view.width;
   const scaleY = canvas.height / view.height;
 
-  // 1. Draw the player rectangles in SCREEN space to prevent subpixel flickering
+  // 1. Draw world-space elements (player cubes, drills, shadows)
+  ctx.save();
+  applyCamera(view);
+
   players.forEach((player) => {
-    drawDrillTrail(player);
     const px = player.renderX ?? player.position.x;
     const py = player.renderY ?? player.position.y;
 
-    const screenX = Math.round((px - view.x) * scaleX);
-    const screenY = Math.round((py - view.y) * scaleY);
-    const screenWidth = Math.round(config.player.width * scaleX);
-    const screenHeight = Math.round(config.player.height * scaleY);
+    drawDrillTrail(player, px, py);
 
     ctx.fillStyle = player.role === "chaser" ? "#fb7185" : "#67e8f9";
     if (spectating && player.inRealm) {
       ctx.shadowColor = "#e879f9";
       ctx.shadowBlur = 18;
+    } else {
+      ctx.shadowBlur = 0; // Explicitly reset to prevent shadow leaking!
     }
-    ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
-    ctx.shadowBlur = 0;
-    drawDrillHead(player);
-  });
 
-  // 2. Draw text, power meters, and stun indicators in screen space
+    // Draw the player cube in world space (allows smooth subpixel movement)
+    ctx.fillRect(px, py, config.player.width, config.player.height);
+    ctx.shadowBlur = 0;
+
+    drawDrillHead(player, px, py);
+  });
+  ctx.restore();
+
+  // 2. Draw screen-space elements (text, power meters, stun indicators)
   players.forEach((player) => {
     const isChaser = player.role === "chaser";
     const px = player.renderX ?? player.position.x;
     const py = player.renderY ?? player.position.y;
 
+    // Calculate crisp screen coordinates for text
     const centerX = Math.round(
       (px + config.player.width / 2 - view.x) * scaleX,
     );
@@ -698,9 +709,17 @@ function drawPlayers(view) {
     const roleText = player.drill
       ? `${player.drill.phase.toUpperCase()} DRILL`
       : `${player.inRealm ? "SHADOW " : ""}${isChaser ? "TAGGER" : "RUNNER"}`;
-    ctx.fillStyle = player.drill ? "#6ee7b7" : player.inRealm ? "#e879f9" : isChaser ? "#fb7185" : "#67e8f9";
+
+    ctx.fillStyle = player.drill
+      ? "#6ee7b7"
+      : player.inRealm
+        ? "#e879f9"
+        : isChaser
+          ? "#fb7185"
+          : "#67e8f9";
     ctx.font = "bold 11px system-ui";
     ctx.fillText(roleText, centerX, bottomY + 14);
+
     if (player.stunnedMs > 0) {
       const stunRatio = clamp(
         player.stunnedMs / config.powers.snowball.stunMs,
@@ -710,7 +729,6 @@ function drawPlayers(view) {
       const indicatorY = topY - 43;
 
       ctx.lineWidth = 3;
-
       ctx.strokeStyle = "rgba(248, 250, 252, .25)";
       ctx.beginPath();
       ctx.arc(centerX, indicatorY, 8, 0, Math.PI * 2);
@@ -731,45 +749,60 @@ function drawPlayers(view) {
 }
 
 function drillPhaseProgress(drill) {
-  const power = config.powers['wall-drill'];
+  const power = config.powers["wall-drill"];
   const recoilRatio = power.recoilDurationMs / power.drillDurationMs;
-  if (drill.phase === 'recoil') return clamp(drill.progress / recoilRatio, 0, 1);
+  if (drill.phase === "recoil")
+    return clamp(drill.progress / recoilRatio, 0, 1);
   return clamp((drill.progress - recoilRatio) / (1 - recoilRatio), 0, 1);
 }
-function drawDrillTrail(player) {
-  if (!player.drill || player.drill.phase !== 'slam') return;
+function drawDrillTrail(player, px, py) {
+  if (!player.drill || player.drill.phase !== "slam") return;
   const direction = player.drill.direction;
   const progress = drillPhaseProgress(player.drill);
-  const centerX = player.position.x + config.player.width / 2;
-  const centerY = player.position.y + config.player.height / 2;
+
+  // Use the smoothed render coordinates instead of the raw server coordinates
+  const centerX = px + config.player.width / 2;
+  const centerY = py + config.player.height / 2;
   const trailLength = 18 + progress * 44;
-  ctx.save();
-  ctx.lineCap = 'round';
+
+  ctx.save(); // Prevent state leaking
+  ctx.lineCap = "round";
   ctx.strokeStyle = `rgba(52, 211, 153, ${0.3 + progress * 0.5})`;
   ctx.lineWidth = 14 - progress * 5;
   ctx.beginPath();
-  ctx.moveTo(centerX - direction.x * trailLength, centerY - direction.y * trailLength);
+  ctx.moveTo(
+    centerX - direction.x * trailLength,
+    centerY - direction.y * trailLength,
+  );
   ctx.lineTo(centerX - direction.x * 8, centerY - direction.y * 8);
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(209, 250, 229, .8)';
+
+  ctx.strokeStyle = "rgba(209, 250, 229, .8)";
   ctx.lineWidth = 3;
   ctx.stroke();
   ctx.restore();
 }
-function drawDrillHead(player) {
+
+function drawDrillHead(player, px, py) {
   if (!player.drill) return;
   const direction = player.drill.direction;
   const progress = drillPhaseProgress(player.drill);
-  const centerX = player.position.x + config.player.width / 2;
-  const centerY = player.position.y + config.player.height / 2;
+
+  // Use the smoothed render coordinates
+  const centerX = px + config.player.width / 2;
+  const centerY = py + config.player.height / 2;
   const angle = Math.atan2(direction.y, direction.x);
-  const wobble = player.drill.phase === 'recoil' ? Math.sin(performance.now() / 35) * 1.5 : 0;
+  const wobble =
+    player.drill.phase === "recoil"
+      ? Math.sin(performance.now() / 35) * 1.5
+      : 0;
+
   ctx.save();
   ctx.translate(centerX, centerY);
   ctx.rotate(angle);
   ctx.translate(wobble, 0);
-  ctx.fillStyle = '#34d399';
-  ctx.strokeStyle = '#d1fae5';
+  ctx.fillStyle = "#34d399";
+  ctx.strokeStyle = "#d1fae5";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(7, -13);
@@ -778,8 +811,10 @@ function drawDrillHead(player) {
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  const spin = (performance.now() / 70 + progress * Math.PI * 3) % (Math.PI * 2);
-  ctx.strokeStyle = '#064e3b';
+
+  const spin =
+    (performance.now() / 70 + progress * Math.PI * 3) % (Math.PI * 2);
+  ctx.strokeStyle = "#064e3b";
   ctx.lineWidth = 2;
   for (let offset = 11; offset <= 22; offset += 5) {
     const halfHeight = (27 - offset) * 0.5;
@@ -802,7 +837,9 @@ function drawPowerMeter(player, centerX, centerY) {
   } else if (player.power === "wall-gun") {
     readyRatio = 1 - player.wallGunCooldownMs / power.cooldownMs;
   } else if (player.power === "wall-drill") {
-    readyRatio = player.drill ? player.drill.progress : 1 - player.wallDrillCooldownMs / power.cooldownMs;
+    readyRatio = player.drill
+      ? player.drill.progress
+      : 1 - player.wallDrillCooldownMs / power.cooldownMs;
   } else if (player.power === "double-jump") {
     readyRatio = player.grounded || player.extraJumpsRemaining > 0 ? 1 : 0;
   } else if (player.power === "realm-shift") {
@@ -829,10 +866,18 @@ function drawProjectiles(view) {
     .forEach((projectile) => {
       const px = projectile.renderX ?? projectile.position.x;
       const py = projectile.renderY ?? projectile.position.y;
-      const wallShot = projectile.type === 'wall-gun';
+      const wallShot = projectile.type === "wall-gun";
       const power = config.powers[projectile.type] || config.powers.snowball;
-      ctx.fillStyle = wallShot ? "#fbbf24" : projectile.inRealm ? "#f0abfc" : "#f8fafc";
-      ctx.strokeStyle = wallShot ? "#fef3c7" : projectile.inRealm ? "#d946ef" : "#bae6fd";
+      ctx.fillStyle = wallShot
+        ? "#fbbf24"
+        : projectile.inRealm
+          ? "#f0abfc"
+          : "#f8fafc";
+      ctx.strokeStyle = wallShot
+        ? "#fef3c7"
+        : projectile.inRealm
+          ? "#d946ef"
+          : "#bae6fd";
       ctx.beginPath();
       ctx.arc(px, py, power.projectileRadius, 0, Math.PI * 2);
       ctx.fill();
